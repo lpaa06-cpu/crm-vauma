@@ -308,61 +308,13 @@ def conectar_odoo():
     return uid, models
 
 def crear_cuentas_odoo(nombre_proyecto, partidas):
-    """Crea grupo y cuentas analíticas en Odoo."""
-    uid, models = conectar_odoo()
-    existing_group = models.execute_kw(ODOO_DB, uid, ODOO_PASS,
-        'account.analytic.group', 'search', [[['name', '=', nombre_proyecto]]])
-    if existing_group:
-        grupo_id = existing_group[0]
-    else:
-        try:
-            grupo_id = models.execute_kw(ODOO_DB, uid, ODOO_PASS,
-                'account.analytic.group', 'create', [{'name': nombre_proyecto}])
-        except:
-            grupo_id = None
-
-    creadas = []
-    for codigo, nombre, _ in partidas:
-        nombre_cuenta = f"{codigo} — {nombre}"
-        existing = models.execute_kw(ODOO_DB, uid, ODOO_PASS,
-            'account.analytic.account', 'search', [[['name', '=', nombre_cuenta]]])
-        if not existing:
-            vals = {'name': nombre_cuenta, 'code': codigo}
-            if grupo_id:
-                vals['group_id'] = grupo_id
-            models.execute_kw(ODOO_DB, uid, ODOO_PASS,
-                'account.analytic.account', 'create', [vals])
-            creadas.append(nombre_cuenta)
-    return len(creadas)
+    """VAUMA no usa Odoo — no crea cuentas analíticas."""
+    return 0
 
 def obtener_datos_proyecto(nombre_proyecto, partidas):
-    uid, models = conectar_odoo()
+    """VAUMA no usa Odoo — retorna gastos vacíos, los gastos manuales se suman aparte."""
     gastos  = {c: 0 for c, _, _ in partidas}
     detalle = {c: [] for c, _, _ in partidas}
-    cuentas = {}
-    for codigo, nombre, _ in partidas:
-        res = models.execute_kw(ODOO_DB, uid, ODOO_PASS,
-            "account.analytic.account", "search",
-            [[["name", "=", f"{codigo} — {nombre}"]]])
-        if res:
-            cuentas[codigo] = res[0]
-    if cuentas:
-        lineas = models.execute_kw(ODOO_DB, uid, ODOO_PASS,
-            "account.analytic.line", "search_read",
-            [[["account_id", "in", list(cuentas.values())]]],
-            {"fields": ["account_id","name","amount","date","partner_id"], "limit": 1000})
-        for l in lineas:
-            acc_id = l["account_id"][0] if l["account_id"] else None
-            for codigo, cid in cuentas.items():
-                if cid == acc_id:
-                    monto = abs(l["amount"])
-                    gastos[codigo] += monto
-                    detalle[codigo].append({
-                        "fecha":       str(l.get("date","—")),
-                        "descripcion": l.get("name",""),
-                        "proveedor":   l["partner_id"][1] if l.get("partner_id") else "—",
-                        "monto":       monto,
-                    })
     return gastos, detalle
 
 def generar_excel(nombre_proyecto, cliente, partidas, gastos, detalle):
