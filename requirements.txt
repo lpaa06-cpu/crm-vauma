@@ -1,0 +1,9 @@
+flask
+gunicorn
+psycopg2-binary
+openpyxl
+pandas
+xlrd
+requests
+reportlab
+Pillow
