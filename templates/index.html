@@ -348,7 +348,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn-cancel" onclick="cerrarModal()">Cancelar</button>
-      <button class="btn-save" onclick="guardarProyecto()">Guardar y crear en Odoo</button>
+      <button class="btn-save" onclick="guardarProyecto()">Guardar proyecto</button>
     </div>
   </div>
 </div>
@@ -670,10 +670,14 @@ async function doLogin(){
 async function logout(){await fetch("/logout");location.reload();}
 
 async function cargarProyectos(){
-  document.getElementById("contenido").innerHTML='<div class="loading"><div class="spinner"></div> Sincronizando con Odoo...</div>';
+  document.getElementById("contenido").innerHTML='<div class="loading"><div class="spinner"></div> Cargando proyectos...</div>';
   const res=await fetch("/api/proyectos");
   const data=await res.json();
   session.proyectos=data;
+  if(!data || data.length===0){
+    document.getElementById("contenido").innerHTML='<div style="text-align:center;padding:60px;color:var(--text3)"><div style="font-size:48px;margin-bottom:16px">🏗️</div><div style="font-size:16px;margin-bottom:8px">No hay proyectos registrados</div><div style="font-size:13px">Hacé clic en <b>+ Proyecto</b> para crear el primero</div></div>';
+    return;
+  }
   if(data.length===1){session.proyectoActual=0;document.getElementById("topbar-title").textContent=data[0].nombre;}
   if(data.length>1){
     const tabs=document.getElementById("proyecto-tabs");
@@ -986,7 +990,7 @@ async function guardarProyecto(){
     body:JSON.stringify({nombre,codigo,cliente,partidas})
   });
   const data=await res.json();
-  btn.textContent="Guardar y crear en Odoo"; btn.disabled=false;
+  btn.textContent="Guardar proyecto"; btn.disabled=false;
   if(data.ok){
     showMsg(`✅ Proyecto creado — ${data.msg}`,"ok");
     setTimeout(()=>{cerrarModal();cargarProyectos();},1500);
