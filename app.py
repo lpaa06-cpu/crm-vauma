@@ -2219,7 +2219,8 @@ def descargar_informe(codigo_proyecto, tipo):
 
 @app.route("/api/cronograma/exportar-mpp/<codigo>")
 def exportar_mpp(codigo):
-    """Exporta el cronograma como XML compatible con Microsoft Project."""
+    """Exporta el cronograma como XML compatible con Microsoft Project,
+    con predecesoras calculadas desde las fechas reales del cronograma del CRM."""
     if "tipo" not in session:
         return "No autorizado", 401
     if not session.get("admin") and session.get("codigo") != codigo:
@@ -2229,7 +2230,7 @@ def exportar_mpp(codigo):
         conn = get_db()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
-            SELECT capitulo, orden, fecha_inicio_plan, fecha_fin_plan,
+            SELECT id, capitulo, orden, fecha_inicio_plan, fecha_fin_plan,
                    duracion_semanas, pct_avance, estado, fecha_inicio_real
             FROM cronograma WHERE proyecto_codigo = %s ORDER BY orden
         """, (codigo,))
@@ -2241,58 +2242,101 @@ def exportar_mpp(codigo):
     proyectos = get_proyectos()
     nombre_proyecto = proyectos.get(codigo, {}).get("nombre", codigo)
 
-    # Generar XML de Microsoft Project
     from xml.etree.ElementTree import Element, SubElement, tostring
     from xml.dom import minidom
+    from datetime import timedelta
+
+    # Calcular predecesoras basándose en fechas de inicio
+    # Una tarea B tiene predecesora A si A.fecha_inicio < B.fecha_inicio
+    # y A.fecha_fin > B.fecha_inicio (solapamiento parcial) o
+    # A.fecha_fin <= B.fecha_inicio (secuencial)
+    # La lógica del CRM: la predecesora más cercana que termina antes o al mismo día
+
+    def calcular_predecesoras(tareas):
+        """Para cada tarea, encuentra la predecesora más lógica basándose en fechas."""
+        predecesoras = {}
+        for i, t in enumerate(tareas):
+            if i == 0:
+                predecesoras[i] = None
+                continue
+            fi = t.get("fecha_inicio_plan")
+            if not fi:
+                predecesoras[i] = i  # predecesora = tarea anterior
+                continue
+
+            # Buscar la tarea anterior cuya fecha_fin es más cercana (antes o igual) a fi
+            mejor = None
+            mejor_diff = None
+            for j, prev in enumerate(tareas[:i]):
+                ff_prev = prev.get("fecha_fin_plan")
+                fi_prev = prev.get("fecha_inicio_plan")
+                if not ff_prev or not fi_prev:
+                    continue
+                # La predecesora arranca antes que esta tarea
+                if fi_prev < fi:
+                    diff = abs((fi - ff_prev).days)
+                    if mejor_diff is None or diff < mejor_diff:
+                        mejor_diff = diff
+                        mejor = j + 1  # UID base 1
+
+            predecesoras[i] = mejor
+        return predecesoras
+
+    predecesoras = calcular_predecesoras(tareas)
 
     root = Element("Project")
     root.set("xmlns", "http://schemas.microsoft.com/project")
 
     # Metadatos
     SubElement(root, "Title").text = nombre_proyecto
-    SubElement(root, "Subject").text = "Control de Obra — Vargas Ulloa Maquinaria S.A."
+    SubElement(root, "Subject").text = f"Control de Obra — {nombre_proyecto}"
     SubElement(root, "Author").text = "Vargas Ulloa Maquinaria S.A."
     SubElement(root, "CreationDate").text = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    SubElement(root, "StartDate").text = (
-        tareas[0]["fecha_inicio_plan"].strftime("%Y-%m-%dT00:00:00")
-        if tareas and tareas[0].get("fecha_inicio_plan") else
-        datetime.now().strftime("%Y-%m-%dT00:00:00")
-    )
-    SubElement(root, "FinishDate").text = (
-        max(t["fecha_fin_plan"] for t in tareas if t.get("fecha_fin_plan")).strftime("%Y-%m-%dT00:00:00")
-        if tareas else datetime.now().strftime("%Y-%m-%dT00:00:00")
-    )
+
+    fi_proyecto = tareas[0]["fecha_inicio_plan"] if tareas and tareas[0].get("fecha_inicio_plan") else datetime.now().date()
+    ff_proyecto = max((t["fecha_fin_plan"] for t in tareas if t.get("fecha_fin_plan")), default=datetime.now().date())
+
+    SubElement(root, "StartDate").text = fi_proyecto.strftime("%Y-%m-%dT00:00:00")
+    SubElement(root, "FinishDate").text = ff_proyecto.strftime("%Y-%m-%dT00:00:00")
     SubElement(root, "HoursPerDay").text = "8"
     SubElement(root, "DaysPerMonth").text = "20"
     SubElement(root, "DefaultTaskType").text = "1"
+    SubElement(root, "CalendarUID").text = "1"
 
-    # Definir calendario base
+    # Calendario base
     cals = SubElement(root, "Calendars")
     cal = SubElement(cals, "Calendar")
     SubElement(cal, "UID").text = "1"
     SubElement(cal, "Name").text = "Standard"
     SubElement(cal, "IsBaseCalendar").text = "1"
+    SubElement(cal, "IsBaselineCalendar").text = "0"
 
     # Tareas
     tasks_elem = SubElement(root, "Tasks")
 
-    # Tarea resumen del proyecto
+    # Tarea resumen (ID 0 = proyecto)
+    pct_global = round(sum(t.get("pct_avance") or 0 for t in tareas) / len(tareas)) if tareas else 0
     task0 = SubElement(tasks_elem, "Task")
     SubElement(task0, "UID").text = "0"
     SubElement(task0, "ID").text = "0"
     SubElement(task0, "Name").text = nombre_proyecto
     SubElement(task0, "OutlineLevel").text = "0"
+    SubElement(task0, "OutlineNumber").text = "0"
     SubElement(task0, "Summary").text = "1"
-    SubElement(task0, "PercentComplete").text = str(
-        round(sum(t.get("pct_avance") or 0 for t in tareas) / len(tareas)) if tareas else 0
-    )
+    SubElement(task0, "Start").text = fi_proyecto.strftime("%Y-%m-%dT08:00:00")
+    SubElement(task0, "Finish").text = ff_proyecto.strftime("%Y-%m-%dT17:00:00")
+    SubElement(task0, "PercentComplete").text = str(pct_global)
+    SubElement(task0, "CalendarUID").text = "1"
 
     estado_map = {
-        "pendiente":   "No iniciado",
-        "en_curso":    "En progreso",
-        "completado":  "Completado",
-        "atrasado":    "Atrasado"
+        "pendiente":  "Sin iniciar",
+        "en_curso":   "En progreso",
+        "completado": "Completado",
+        "atrasado":   "Atrasado"
     }
+
+    # Relaciones (Links) entre tareas
+    links_elem = SubElement(root, "TaskLinks")
 
     for i, tarea in enumerate(tareas, 1):
         task = SubElement(tasks_elem, "Task")
@@ -2300,44 +2344,82 @@ def exportar_mpp(codigo):
         SubElement(task, "ID").text = str(i)
         SubElement(task, "Name").text = tarea["capitulo"]
         SubElement(task, "OutlineLevel").text = "1"
+        SubElement(task, "OutlineNumber").text = str(i)
         SubElement(task, "Summary").text = "0"
+        SubElement(task, "CalendarUID").text = "1"
 
-        # Duración en minutos (MS Project usa minutos internamente)
+        # Duración — convertir semanas a minutos laborales
         dur_semanas = float(tarea.get("duracion_semanas") or 1)
-        dur_minutos = int(dur_semanas * 5 * 8 * 60)  # semanas → días laborales → horas → minutos
+        dur_dias = dur_semanas * 5  # días laborales
+        dur_minutos = int(dur_dias * 8 * 60)
         SubElement(task, "Duration").text = f"PT{dur_minutos}M"
-        SubElement(task, "DurationFormat").text = "7"  # semanas
+        SubElement(task, "DurationFormat").text = "35"  # 35 = días en MS Project
 
-        # Fechas
-        if tarea.get("fecha_inicio_plan"):
-            fi = tarea["fecha_inicio_plan"]
+        # Fechas reales de inicio y fin
+        fi = tarea.get("fecha_inicio_plan")
+        ff = tarea.get("fecha_fin_plan")
+        if fi:
             SubElement(task, "Start").text = fi.strftime("%Y-%m-%dT08:00:00")
-        if tarea.get("fecha_fin_plan"):
-            ff = tarea["fecha_fin_plan"]
+            SubElement(task, "EarlyStart").text = fi.strftime("%Y-%m-%dT08:00:00")
+            SubElement(task, "LateStart").text = fi.strftime("%Y-%m-%dT08:00:00")
+        if ff:
             SubElement(task, "Finish").text = ff.strftime("%Y-%m-%dT17:00:00")
-        if tarea.get("fecha_inicio_real"):
-            fir = tarea["fecha_inicio_real"]
-            SubElement(task, "ActualStart").text = fir.strftime("%Y-%m-%dT08:00:00")
+            SubElement(task, "EarlyFinish").text = ff.strftime("%Y-%m-%dT17:00:00")
+            SubElement(task, "LateFinish").text = ff.strftime("%Y-%m-%dT17:00:00")
 
+        # Fecha real de inicio si existe
+        if tarea.get("fecha_inicio_real"):
+            SubElement(task, "ActualStart").text = tarea["fecha_inicio_real"].strftime("%Y-%m-%dT08:00:00")
+
+        # % avance
         pct = tarea.get("pct_avance") or 0
         SubElement(task, "PercentComplete").text = str(pct)
         SubElement(task, "PercentWorkComplete").text = str(pct)
 
+        if pct == 100 and ff:
+            SubElement(task, "ActualFinish").text = ff.strftime("%Y-%m-%dT17:00:00")
+
+        # Estado
         estado = tarea.get("estado", "pendiente")
         SubElement(task, "Notes").text = estado_map.get(estado, estado)
-
-        # Milestone si es 0 semanas
         SubElement(task, "Milestone").text = "1" if dur_semanas == 0 else "0"
         SubElement(task, "Critical").text = "1" if estado == "atrasado" else "0"
+        SubElement(task, "ConstraintType").text = "2"  # Must Start On — respeta fecha exacta del CRM
+        if fi:
+            SubElement(task, "ConstraintDate").text = fi.strftime("%Y-%m-%dT08:00:00")
 
-    # Asignaciones vacías (requerido por el esquema)
+        # Predecesora con tipo SS (Start-to-Start) o FS (Finish-to-Start)
+        pred_uid = predecesoras.get(i - 1)
+        if pred_uid:
+            pred_tarea = tareas[pred_uid - 1]
+            fi_pred = pred_tarea.get("fecha_fin_plan")
+            fi_actual = tarea.get("fecha_inicio_plan")
+
+            link = SubElement(links_elem, "TaskLink")
+            SubElement(link, "PredecessorUID").text = str(pred_uid)
+            SubElement(link, "SuccessorUID").text = str(i)
+
+            # Si hay solapamiento (tarea arranca antes de que termine la predecesora → SS)
+            # Si es secuencial (tarea arranca después de que termina predecesora → FS)
+            if fi_pred and fi_actual and fi_actual < fi_pred:
+                SubElement(link, "Type").text = "1"  # SS = Start to Start
+                # Lag = diferencia en días laborales
+                lag_dias = (fi_actual - pred_tarea["fecha_inicio_plan"]).days if pred_tarea.get("fecha_inicio_plan") else 0
+                lag_min = lag_dias * 8 * 60
+                SubElement(link, "LinkLag").text = str(lag_min)
+                SubElement(link, "LagFormat").text = "7"
+            else:
+                SubElement(link, "Type").text = "0"  # FS = Finish to Start
+                # Lag negativo si hay solapamiento
+                if fi_pred and fi_actual:
+                    lag_dias = (fi_actual - fi_pred).days
+                    lag_min = lag_dias * 8 * 60
+                    SubElement(link, "LinkLag").text = str(lag_min)
+                    SubElement(link, "LagFormat").text = "7"
+
     SubElement(root, "Assignments")
 
-    # Serializar a XML con formato bonito
-    xml_str = minidom.parseString(tostring(root, encoding="unicode")).toprettyxml(
-        indent="  ", encoding=None
-    )
-    # Quitar la declaración XML duplicada que agrega minidom
+    xml_str = minidom.parseString(tostring(root, encoding="unicode")).toprettyxml(indent="  ", encoding=None)
     xml_lines = xml_str.split("\n")
     if xml_lines[0].startswith("<?xml"):
         xml_lines[0] = '<?xml version="1.0" encoding="UTF-8"?>'
