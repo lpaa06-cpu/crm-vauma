@@ -2335,8 +2335,9 @@ def exportar_mpp(codigo):
         "atrasado":   "Atrasado"
     }
 
-    # Relaciones (Links) entre tareas
-    links_elem = SubElement(root, "TaskLinks")
+    # Sin relaciones de dependencia — usamos fechas fijas del CRM
+    # Esto garantiza que ProjectLibre respete exactamente el cronograma generado
+    links_elem = SubElement(root, "TaskLinks")  # vacío intencional
 
     for i, tarea in enumerate(tareas, 1):
         task = SubElement(tasks_elem, "Task")
@@ -2384,38 +2385,11 @@ def exportar_mpp(codigo):
         SubElement(task, "Notes").text = estado_map.get(estado, estado)
         SubElement(task, "Milestone").text = "1" if dur_semanas == 0 else "0"
         SubElement(task, "Critical").text = "1" if estado == "atrasado" else "0"
-        SubElement(task, "ConstraintType").text = "2"  # Must Start On — respeta fecha exacta del CRM
+        SubElement(task, "ConstraintType").text = "4"  # Must Start On (ProjectLibre compatible)
         if fi:
             SubElement(task, "ConstraintDate").text = fi.strftime("%Y-%m-%dT08:00:00")
 
-        # Predecesora con tipo SS (Start-to-Start) o FS (Finish-to-Start)
-        pred_uid = predecesoras.get(i - 1)
-        if pred_uid:
-            pred_tarea = tareas[pred_uid - 1]
-            fi_pred = pred_tarea.get("fecha_fin_plan")
-            fi_actual = tarea.get("fecha_inicio_plan")
-
-            link = SubElement(links_elem, "TaskLink")
-            SubElement(link, "PredecessorUID").text = str(pred_uid)
-            SubElement(link, "SuccessorUID").text = str(i)
-
-            # Si hay solapamiento (tarea arranca antes de que termine la predecesora → SS)
-            # Si es secuencial (tarea arranca después de que termina predecesora → FS)
-            if fi_pred and fi_actual and fi_actual < fi_pred:
-                SubElement(link, "Type").text = "1"  # SS = Start to Start
-                # Lag = diferencia en días laborales
-                lag_dias = (fi_actual - pred_tarea["fecha_inicio_plan"]).days if pred_tarea.get("fecha_inicio_plan") else 0
-                lag_min = lag_dias * 8 * 60
-                SubElement(link, "LinkLag").text = str(lag_min)
-                SubElement(link, "LagFormat").text = "7"
-            else:
-                SubElement(link, "Type").text = "0"  # FS = Finish to Start
-                # Lag negativo si hay solapamiento
-                if fi_pred and fi_actual:
-                    lag_dias = (fi_actual - fi_pred).days
-                    lag_min = lag_dias * 8 * 60
-                    SubElement(link, "LinkLag").text = str(lag_min)
-                    SubElement(link, "LagFormat").text = "7"
+        # Sin predecesoras — fechas fijas del CRM garantizan el cronograma correcto
 
     SubElement(root, "Assignments")
 
