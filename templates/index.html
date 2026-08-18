@@ -713,6 +713,7 @@ function renderProyecto(p){
           <div class="proyecto-badge-estado" style="background:${p.pct_global>=100?"rgba(239,68,68,0.15)":p.pct_global>=80?"rgba(245,158,11,0.15)":"rgba(232,160,32,0.12)"};color:${p.pct_global>=100?"var(--red2)":p.pct_global>=80?"var(--yellow2)":"var(--brand)"}">
             ${p.pct_global>=100?"⚠ EXCEDIDO":p.pct_global>=80?"🟡 EN ALERTA":p.pct_global>0?"🟢 EN EJECUCIÓN":"⚪ SIN INICIO"}
           </div>
+          ${session.admin?`<button onclick="eliminarProyecto('${p.codigo}','${p.nombre}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:4px 10px;color:var(--red2);font-size:11px;font-weight:600;cursor:pointer" title="Eliminar proyecto">🗑 Eliminar</button>`:""}
         </div>
       </div>
     </div>
@@ -1494,6 +1495,25 @@ async function guardarEmailCliente(codigo, email){
     alert(email ? `✅ Email guardado: ${email}\n\nEl cliente recibirá notificaciones automáticas cuando haya avances, fotos o entradas en bitácora.` : "Email eliminado. No se enviarán notificaciones.");
   } else {
     alert("Error: " + (data.msg||"desconocido"));
+  }
+}
+
+// ── ELIMINAR PROYECTO ────────────────────────────────────
+async function eliminarProyecto(codigo, nombre){
+  if(!confirm(`¿Eliminar el proyecto "${nombre}" (${codigo})?\n\nEsta acción eliminará también:\n• Cronograma\n• Fotos de obra\n• Bitácora\n• Gastos manuales\n\nNo se puede deshacer.`)) return;
+  if(!confirm(`Confirmación final: ¿Eliminar permanentemente "${nombre}"?`)) return;
+  try {
+    const res = await fetch(`/api/admin/eliminar-proyecto/${codigo}`, {method:"DELETE"});
+    const data = await res.json();
+    if(data.ok){
+      await fetch(`/api/admin/limpiar-proyecto/${codigo}`, {method:"DELETE"});
+      alert(`✅ Proyecto "${nombre}" eliminado correctamente.`);
+      await cargarProyectos();
+    } else {
+      alert("Error: " + (data.msg||"No se pudo eliminar."));
+    }
+  } catch(e){
+    alert("Error de conexión: " + e.message);
   }
 }
 
