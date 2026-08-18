@@ -744,14 +744,34 @@ def actualizar_contacto():
 
 @app.route("/api/admin/eliminar-proyecto/<codigo>", methods=["DELETE"])
 def eliminar_proyecto(codigo):
-    """Elimina un proyecto dinámico."""
+    """Elimina un proyecto dinámico y todos sus datos relacionados."""
     if not session.get("admin"):
         return jsonify({"error": "No autorizado"}), 401
     if codigo in PROYECTOS_BASE:
         return jsonify({"ok": False, "msg": "No se pueden eliminar proyectos base"}), 400
-    if delete_proyecto_db(codigo):
-        return jsonify({"ok": True})
-    return jsonify({"ok": False, "msg": "Proyecto no encontrado"}), 404
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM cronograma WHERE proyecto_codigo = %s", (codigo,))
+        cur.execute("DELETE FROM bitacora WHERE proyecto_codigo = %s", (codigo,))
+        cur.execute("DELETE FROM fotos_obra WHERE proyecto_codigo = %s", (codigo,))
+        cur.execute("DELETE FROM gastos_manuales WHERE proyecto_codigo = %s", (codigo,))
+        cur.execute("DELETE FROM proyectos WHERE codigo = %s", (codigo,))
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close(); conn.close()
+        if deleted > 0:
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "msg": "Proyecto no encontrado"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@app.route("/api/admin/limpiar-proyecto/<codigo>", methods=["DELETE"])
+def limpiar_proyecto(codigo):
+    if not session.get("admin"):
+        return jsonify({"error": "No autorizado"}), 401
+    return jsonify({"ok": True})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
