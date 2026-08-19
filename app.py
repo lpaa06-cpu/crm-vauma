@@ -901,8 +901,8 @@ def generar_desde_planos():
     archivos = request.files.getlist("planos")
     if not archivos or len(archivos) == 0:
         return jsonify({"ok": False, "msg": "No se recibieron planos"}), 400
-    if len(archivos) > 10:
-        return jsonify({"ok": False, "msg": "Máximo 10 planos por análisis"}), 400
+    if len(archivos) > 20:
+        return jsonify({"ok": False, "msg": "Máximo 20 planos por análisis"}), 400
 
     nombre_proyecto = request.form.get("nombre", "Proyecto sin nombre")
     area_m2 = request.form.get("area_m2", "")
