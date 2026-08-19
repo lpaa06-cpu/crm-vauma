@@ -378,7 +378,7 @@
         <div class="planos-upload-area" id="planos-upload-area" onclick="document.getElementById('planos-input').click()" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handlePlanosDrop(event)">
           <div class="upload-icon">📐</div>
           <div class="upload-text">Arrastrá tus planos aquí o hacé clic para seleccionar</div>
-          <div class="upload-sub">Hasta 10 archivos · PNG, JPG, WEBP o PDF</div>
+          <div class="upload-sub">Hasta 20 archivos · PNG, JPG, WEBP o PDF</div>
         </div>
         <input type="file" id="planos-input" accept=".png,.jpg,.jpeg,.webp,.pdf" multiple style="display:none" onchange="handlePlanosFiles(this.files)">
         <div class="planos-lista" id="planos-lista"></div>
@@ -1709,7 +1709,7 @@ function cerrarModalPlanos(){document.getElementById("modal-planos-overlay").cla
 
 function handlePlanosFiles(files){
   for(const f of files){
-    if(archivosPlanos.length>=10){showMsgPlanos("Máximo 10 archivos por análisis.","err");break;}
+    if(archivosPlanos.length>=20){showMsgPlanos("Máximo 20 archivos por análisis.","err");break;}
     archivosPlanos.push(f);
   }
   renderListaPlanos();
