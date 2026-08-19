@@ -2371,9 +2371,10 @@ def exportar_mpp(codigo):
 
         # Duración — convertir semanas a minutos laborales
         dur_semanas = float(tarea.get("duracion_semanas") or 1)
-        dur_dias = int(dur_semanas * 5)  # días laborales
-        SubElement(task, "Duration").text = f"PT{dur_dias}D"
-        SubElement(task, "DurationFormat").text = "35"  # 35 = días
+        dur_dias = round(dur_semanas * 7, 1)  # días calendario
+        SubElement(task, "Duration").text = f"P{dur_dias}D"
+        SubElement(task, "DurationFormat").text = "7"
+        SubElement(task, "ManuallyScheduled").text = "1"
 
         # Fechas reales de inicio y fin
         fi = tarea.get("fecha_inicio_plan")
