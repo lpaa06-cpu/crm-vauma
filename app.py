@@ -10,6 +10,7 @@ from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "vauma-maquinaria-2026-secreto")
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB máximo
 
 class DateEncoder(json.JSONEncoder):
     def default(self, obj):
