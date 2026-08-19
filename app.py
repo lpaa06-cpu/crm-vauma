@@ -10,6 +10,7 @@ from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "vauma-maquinaria-2026-secreto")
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB máximo
 
 class DateEncoder(json.JSONEncoder):
@@ -44,7 +45,7 @@ SENDGRID_FROM_NAME = os.environ.get("SENDGRID_FROM_NAME", "Vargas Ulloa Maquinar
 
 def get_db():
     """Retorna conexión a PostgreSQL."""
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(DATABASE_URL, connect_timeout=5)
 
 def init_db():
     """Crea tablas si no existen."""
