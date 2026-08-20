@@ -1753,7 +1753,7 @@ async function analizarPlanos(){
   const progressSub = document.getElementById("planos-progress-sub");
 
   // Enviar en lotes de 5 archivos para evitar límite de 100MB de Railway
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = 3;
   const lotes = [];
   for(let i=0; i<archivosPlanos.length; i+=BATCH_SIZE){
     lotes.push(archivosPlanos.slice(i, i+BATCH_SIZE));
