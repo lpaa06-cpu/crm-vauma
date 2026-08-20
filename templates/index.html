@@ -1749,28 +1749,82 @@ async function analizarPlanos(){
   document.getElementById("btn-analizar-planos").style.display="none";
   document.getElementById("planos-msg").style.display="none";
 
-  const fd=new FormData();
-  fd.append("nombre",nombre);
-  fd.append("area_m2",area);
-  archivosPlanos.forEach(f=>fd.append("planos",f));
+  const progressText = document.getElementById("planos-progress-text");
+  const progressSub = document.getElementById("planos-progress-sub");
+
+  // Enviar en lotes de 5 archivos para evitar límite de 100MB de Railway
+  const BATCH_SIZE = 5;
+  const lotes = [];
+  for(let i=0; i<archivosPlanos.length; i+=BATCH_SIZE){
+    lotes.push(archivosPlanos.slice(i, i+BATCH_SIZE));
+  }
+
+  let detalleTotal = [];
+  let totalMo = 0, totalMat = 0;
+  let resumenCapitulos = {};
 
   try{
-    const res=await fetch("/api/admin/generar-desde-planos",{method:"POST",body:fd});
-    const data=await res.json();
-    document.getElementById("planos-progress").style.display="none";
-    if(data.ok){
-      resultadoPlanos=data;
-      mostrarResultadoPlanos(data);
-    } else {
-      document.getElementById("planos-upload-section").style.display="block";
-      document.getElementById("btn-analizar-planos").style.display="inline-block";
-      showMsgPlanos(data.msg||"Error al analizar los planos.","err");
+    for(let i=0; i<lotes.length; i++){
+      const lote = lotes[i];
+      progressText.textContent = `Analizando lote ${i+1} de ${lotes.length}...`;
+      progressSub.textContent = `Planos ${i*BATCH_SIZE+1}–${Math.min((i+1)*BATCH_SIZE, archivosPlanos.length)} de ${archivosPlanos.length}`;
+
+      const fd=new FormData();
+      fd.append("nombre", nombre);
+      fd.append("area_m2", area);
+      fd.append("lote", `${i+1}/${lotes.length}`);
+      lote.forEach(f=>fd.append("planos",f));
+
+      const res=await fetch("/api/admin/generar-desde-planos",{method:"POST",body:fd});
+      if(!res.ok){
+        const txt = await res.text();
+        throw new Error(`Lote ${i+1}: HTTP ${res.status} — ${txt.slice(0,100)}`);
+      }
+      const data=await res.json();
+      if(!data.ok) throw new Error(`Lote ${i+1}: ${data.msg||"Error desconocido"}`);
+
+      // Acumular resultados
+      detalleTotal = detalleTotal.concat(data.detalle || []);
+      totalMo += data.total_mo || 0;
+      totalMat += data.total_mat || 0;
+
+      // Combinar capítulos
+      (data.resumen_capitulos || []).forEach(c=>{
+        if(resumenCapitulos[c.nombre]){
+          resumenCapitulos[c.nombre] += c.monto;
+        } else {
+          resumenCapitulos[c.nombre] = c.monto;
+        }
+      });
     }
+
+    // Calcular admin y utilidad sobre el total combinado
+    const PCT_ADMIN = 0.08, PCT_UTIL = 0.07;
+    const costoDirecto = totalMo + totalMat;
+    const montoAdmin = Math.round(costoDirecto * PCT_ADMIN);
+    const montoUtil = Math.round(costoDirecto * PCT_UTIL);
+
+    const resultadoCombinado = {
+      ok: true,
+      detalle: detalleTotal,
+      resumen_capitulos: Object.entries(resumenCapitulos).map(([nombre,monto])=>({nombre,monto})),
+      total_mo: Math.round(totalMo),
+      total_mat: Math.round(totalMat),
+      costo_directo: Math.round(costoDirecto),
+      monto_administracion: montoAdmin,
+      monto_utilidad: montoUtil,
+      total_general: Math.round(costoDirecto + montoAdmin + montoUtil)
+    };
+
+    document.getElementById("planos-progress").style.display="none";
+    resultadoPlanos = resultadoCombinado;
+    mostrarResultadoPlanos(resultadoCombinado);
+
   } catch(err){
     document.getElementById("planos-progress").style.display="none";
     document.getElementById("planos-upload-section").style.display="block";
     document.getElementById("btn-analizar-planos").style.display="inline-block";
-    showMsgPlanos("Error de conexión al analizar planos.","err");
+    showMsgPlanos("Error al analizar planos: " + err.message,"err");
   }
 }
 
