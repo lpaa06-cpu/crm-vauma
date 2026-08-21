@@ -36,7 +36,8 @@ ADMIN_PASS = os.environ.get("ADMIN_PASS_1", "Alfaro2026")
 PROYECTOS_BASE = {}
 
 # ── Base de datos PostgreSQL ─────────────────────────
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# Railway inyecta DATABASE_URL interna — usar PUBLIC si está disponible
+DATABASE_URL = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL", "")
 
 # ── SendGrid (notificaciones por email) ──────────────────
 SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
@@ -935,19 +936,49 @@ def generar_desde_planos():
         return jsonify({"ok": False, "msg": "Ningún archivo válido (use PNG, JPG, WEBP o PDF)"}), 400
 
     area_txt = f"\nÁREA APROXIMADA: {area_m2} m²" if area_m2 else ""
+    lote_info = request.form.get("lote", "1/1")
+    lote_actual, lote_total = lote_info.split("/") if "/" in lote_info else ("1", "1")
+    es_primer_lote = lote_actual == "1"
+    es_ultimo_lote = lote_actual == lote_total
+
+    if es_primer_lote and lote_total == "1":
+        # Análisis normal — un solo lote
+        instruccion_lote = """1. Identifica TODAS las actividades constructivas visibles o inferibles de los planos: movimiento de tierras, fundaciones, estructura, mampostería, techos, acabados, instalaciones eléctricas, hidráulicas, sanitarias, pintura, etc.
+2. Para cada actividad, estima: unidad de medida (m2, m3, m, kg, ml, unidad, global), cantidad, precio unitario de MANO DE OBRA (₡), precio unitario de MATERIALES (₡).
+3. Genera entre 40 y 70 líneas de actividad en total, distribuidas en los capítulos.
+7. INCLUÍ OBLIGATORIAMENTE un capítulo llamado \"Gastos Indirectos\" con actividades propias."""
+    elif es_primer_lote:
+        # Primer lote de varios — capítulos estructurales principales
+        instruccion_lote = f"""IMPORTANTE: Estos son los planos {lote_actual} de {lote_total} lotes. Analizá SOLO las disciplinas visibles en ESTOS planos.
+1. Identificá las actividades de los capítulos principales que se ven en estos planos específicamente.
+2. NO incluyas Gastos Indirectos (se agregan en el último lote).
+3. Generá entre 15 y 25 líneas específicas a lo que muestran ESTOS planos.
+4. Sé muy específico — no agregues actividades genéricas que no se vean claramente en estos planos."""
+    elif es_ultimo_lote:
+        # Último lote — completa lo que falta y agrega indirectos
+        instruccion_lote = f"""IMPORTANTE: Estos son los planos {lote_actual} de {lote_total} lotes ya analizados.
+1. Analizá SOLO lo que muestran estos planos específicos que NO hayas visto antes.
+2. Identificá actividades complementarias o especialidades (eléctrico, mecánico, sanitario, acabados especiales) visibles en ESTOS planos.
+3. INCLUÍ OBLIGATORIAMENTE un capítulo \"Gastos Indirectos\" con: alquiler de andamios, mezcladora, compactadora, herramienta menor, bodega temporal, limpieza final, transporte, energía y agua provisional, EPP.
+4. Generá entre 10 y 20 líneas específicas a estos planos más los Gastos Indirectos.
+5. NO repitas actividades como excavación, fundaciones, columnas, vigas — esas ya fueron cubiertas."""
+    else:
+        # Lote intermedio
+        instruccion_lote = f"""IMPORTANTE: Estos son los planos {lote_actual} de {lote_total} lotes ya analizados.
+1. Analizá SOLO las actividades específicas visibles en ESTOS planos que sean distintas a obra civil básica (fundaciones, columnas, vigas ya fueron cubiertas).
+2. Enfocate en especialidades: instalaciones, acabados especiales, elementos únicos de estos planos.
+3. NO incluyas Gastos Indirectos.
+4. Generá entre 10 y 20 líneas muy específicas a lo que muestran ESTOS planos."""
 
     prompt_texto = f"""Eres un ingeniero de costos costarricense experto en presupuestos de construcción residencial.
 
-Analiza estos planos de construcción del proyecto "{nombre_proyecto}"{area_txt} y genera un presupuesto detallado de obra civil, igual al formato estándar de control de obra en Costa Rica.
+Analiza estos planos de construcción del proyecto "{nombre_proyecto}"{area_txt}.
 
 INSTRUCCIONES:
-1. Identifica TODAS las actividades constructivas visibles o inferibles de los planos: movimiento de tierras, fundaciones, estructura, mampostería, techos, acabados, instalaciones eléctricas, hidráulicas, sanitarias, pintura, etc.
-2. Para cada actividad, estima: unidad de medida (m2, m3, m, kg, ml, unidad, global), cantidad, precio unitario de MANO DE OBRA (₡), precio unitario de MATERIALES (₡).
-3. Usa precios de mercado costarricense actuales (Gran Área Metropolitana, 2026).
-4. Agrupa las actividades en CAPÍTULOS (ej: "Preliminares", "Fundaciones", "Estructura", "Mampostería", "Techos", "Acabados", "Instalaciones Eléctricas", "Instalaciones Hidrosanitarias", "Pintura", etc.)
-5. Genera entre 40 y 70 líneas de actividad en total, distribuidas en los capítulos.
-6. Sé razonable y conservador con las cantidades — basate en lo que se puede inferir de los planos, y si algo no es claro, usa una estimación típica para una vivienda residencial de ese tamaño.
-7. INCLUÍ OBLIGATORIAMENTE un capítulo llamado "Gastos Indirectos" con actividades propias (no como porcentaje), por ejemplo: alquiler de andamios, alquiler de mezcladora, alquiler de compactadora, herramienta menor, bodega temporal/caseta de obra, limpieza final de obra, transporte de materiales, energía y agua temporal de obra, rotulación y señalización, EPP (equipo de protección personal) de cuadrilla. Estimá cantidades y precios razonables para estas actividades según la duración típica de una obra de ese tamaño.
+{instruccion_lote}
+
+Usa precios de mercado costarricense actuales (Gran Área Metropolitana, 2026).
+Agrupa las actividades en CAPÍTULOS apropiados según lo que ves.
 
 Devuelve ÚNICAMENTE un JSON válido sin texto adicional ni backticks, con esta estructura exacta:
 {{
