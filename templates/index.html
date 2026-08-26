@@ -757,6 +757,7 @@ async function doLogin(){
       const esAdminPrincipal = session.rol === "admin_principal";
 
       document.getElementById("admin-badge").style.display="inline";
+      document.getElementById("admin-badge").textContent = data.nombre || data.rol==="admin_principal" ? (data.nombre||"Admin") : session.rol;
 
       // Mostrar botones según módulos autorizados
       const tiene = (m) => esAdminPrincipal || mods.includes(m);
@@ -788,7 +789,7 @@ async function cargarProyectos(){
 
   // Filtrar proyectos según asignación del usuario
   let proyectosFiltrados = data;
-  if(session.proyectosAsignados && session.proyectosAsignados.length > 0){
+  if(session.rol !== "admin_principal" && session.proyectosAsignados && session.proyectosAsignados.length > 0){
     proyectosFiltrados = data.filter(p => session.proyectosAsignados.includes(p.codigo));
   }
 
@@ -836,7 +837,7 @@ function renderProyecto(p){
           <div class="proyecto-badge-estado" style="background:${p.pct_global>=100?"rgba(239,68,68,0.15)":p.pct_global>=80?"rgba(245,158,11,0.15)":"rgba(232,160,32,0.12)"};color:${p.pct_global>=100?"var(--red2)":p.pct_global>=80?"var(--yellow2)":"var(--brand)"}">
             ${p.pct_global>=100?"⚠ EXCEDIDO":p.pct_global>=80?"🟡 EN ALERTA":p.pct_global>0?"🟢 EN EJECUCIÓN":"⚪ SIN INICIO"}
           </div>
-          ${session.admin?`<button onclick="eliminarProyecto('${p.codigo}','${p.nombre}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:4px 10px;color:var(--red2);font-size:11px;font-weight:600;cursor:pointer" title="Eliminar proyecto">🗑 Eliminar</button>`:""}
+          ${(session.rol==="admin_principal"||session.modulos.includes("crear_proyectos"))?`<button onclick="eliminarProyecto('${p.codigo}','${p.nombre}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:4px 10px;color:var(--red2);font-size:11px;font-weight:600;cursor:pointer" title="Eliminar proyecto">🗑 Eliminar</button>`:""}
         </div>
       </div>
     </div>
