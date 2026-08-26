@@ -264,7 +264,10 @@
       <div class="field-label">Usuario</div>
       <input type="text" id="admin-user" placeholder="usuario" autocomplete="off" onkeydown="if(event.key==='Enter') doLogin()">
       <div class="field-label">Contraseña</div>
-      <input type="password" id="admin-pass" placeholder="contraseña" autocomplete="new-password" onkeydown="if(event.key==='Enter') doLogin()">
+      <div style="position:relative">
+        <input type="password" id="admin-pass" placeholder="contraseña" autocomplete="new-password" onkeydown="if(event.key==='Enter') doLogin()" style="padding-right:36px;width:100%;box-sizing:border-box">
+        <button type="button" onclick="togglePass('admin-pass',this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:0;line-height:1">👁</button>
+      </div>
       <button class="btn-primary" onclick="doLogin()">Acceder →</button>
     </div>
     <div class="login-error" id="login-error">Credenciales inválidas.</div>
@@ -663,7 +666,10 @@
           </div>
           <div>
             <div style="font-size:10px;color:var(--text3);margin-bottom:4px">CONTRASEÑA *</div>
-            <input type="password" id="u-password" class="input-obra" placeholder="Mínimo 6 caracteres">
+            <div style="position:relative">
+              <input type="password" id="u-password" class="input-obra" placeholder="Mínimo 6 caracteres" style="padding-right:36px">
+              <button type="button" onclick="togglePass('u-password',this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:0;line-height:1">👁</button>
+            </div>
           </div>
         </div>
         <div style="margin-bottom:12px">
@@ -1661,6 +1667,16 @@ async function descargarInforme(tipo){
 }
 
 // ── GESTIÓN DE USUARIOS ──────────────────────────────────
+function togglePass(fieldId, btn){
+  const input = document.getElementById(fieldId);
+  if(input.type === "password"){
+    input.type = "text";
+    btn.textContent = "🙈";
+  } else {
+    input.type = "password";
+    btn.textContent = "👁";
+  }
+}
 const MODULOS_LABELS = {
   control_financiero: "💰 Control Financiero",
   control_obra: "🏗️ Control de Obra",
