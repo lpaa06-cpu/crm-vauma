@@ -748,7 +748,7 @@ async function doLogin(){
     session.admin=data.admin;
     session.rol = data.rol || "admin_principal";
     session.modulos = data.modulos || [];
-    session.proyectosAsignados = data.proyectos_asignados || null;
+    session.proyectosAsignados = Array.isArray(data.proyectos_asignados) ? data.proyectos_asignados : null;
     document.getElementById("login-screen").style.display="none";
     document.getElementById("app-screen").style.display="block";
 
@@ -789,7 +789,7 @@ async function cargarProyectos(){
 
   // Filtrar proyectos según asignación del usuario
   let proyectosFiltrados = data;
-  if(session.rol !== "admin_principal" && session.proyectosAsignados && session.proyectosAsignados.length > 0){
+  if(session.rol !== "admin_principal" && Array.isArray(session.proyectosAsignados) && session.proyectosAsignados.length > 0){
     proyectosFiltrados = data.filter(p => session.proyectosAsignados.includes(p.codigo));
   }
 
