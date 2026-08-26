@@ -746,29 +746,34 @@ async function doLogin(){
   const data=await res.json();
   if(data.ok){
     session.admin=data.admin;
+    session.rol = data.rol || "admin_principal";
+    session.modulos = data.modulos || [];
+    session.proyectosAsignados = data.proyectos_asignados || null;
     document.getElementById("login-screen").style.display="none";
     document.getElementById("app-screen").style.display="block";
+
     if(data.admin){
+      const mods = session.modulos;
+      const esAdminPrincipal = session.rol === "admin_principal";
+
       document.getElementById("admin-badge").style.display="inline";
-      document.getElementById("btn-nuevo-proyecto").style.display="inline-flex";
-      document.getElementById("btn-planos").style.display="inline-flex";
-      document.getElementById("btn-obra").style.display="inline-flex";
-      document.getElementById("btn-informes-wrap").style.display="inline-flex";
-      if(data.rol==="admin_principal"){
+
+      // Mostrar botones según módulos autorizados
+      const tiene = (m) => esAdminPrincipal || mods.includes(m);
+
+      if(tiene("crear_proyectos"))
+        document.getElementById("btn-nuevo-proyecto").style.display="inline-flex";
+      if(tiene("desde_planos"))
+        document.getElementById("btn-planos").style.display="inline-flex";
+      if(tiene("control_obra"))
+        document.getElementById("btn-obra").style.display="inline-flex";
+      if(tiene("informes_pdf") || tiene("control_financiero"))
+        document.getElementById("btn-informes-wrap").style.display="inline-flex";
+      if(esAdminPrincipal || tiene("gestion_usuarios"))
         document.getElementById("btn-usuarios").style.display="inline-flex";
-      }
-      session.rol = data.rol || "admin_principal";
-      session.modulos = data.modulos || [];
-      session.proyectosAsignados = data.proyectos_asignados || null;
+
     } else {
-      // Cliente: solo puede descargar informe completo
       document.getElementById("btn-informes-wrap").style.display="inline-flex";
-      if(data.rol==="admin_principal"){
-        document.getElementById("btn-usuarios").style.display="inline-flex";
-      }
-      session.rol = data.rol || "admin_principal";
-      session.modulos = data.modulos || [];
-      session.proyectosAsignados = data.proyectos_asignados || null;
     }
     cargarProyectos();
   } else { err.style.display="block"; }
@@ -780,16 +785,28 @@ async function cargarProyectos(){
   document.getElementById("contenido").innerHTML='<div class="loading"><div class="spinner"></div> Cargando proyectos...</div>';
   const res=await fetch("/api/proyectos");
   const data=await res.json();
-  session.proyectos=data;
-  if(!data || data.length===0){
-    document.getElementById("contenido").innerHTML='<div style="text-align:center;padding:60px;color:var(--text3)"><div style="font-size:48px;margin-bottom:16px">🏗️</div><div style="font-size:16px;margin-bottom:8px">No hay proyectos registrados</div><div style="font-size:13px">Hacé clic en <b>+ Proyecto</b> para crear el primero</div></div>';
+
+  // Filtrar proyectos según asignación del usuario
+  let proyectosFiltrados = data;
+  if(session.proyectosAsignados && session.proyectosAsignados.length > 0){
+    proyectosFiltrados = data.filter(p => session.proyectosAsignados.includes(p.codigo));
+  }
+
+  session.proyectos = proyectosFiltrados;
+
+  if(!proyectosFiltrados || proyectosFiltrados.length===0){
+    document.getElementById("contenido").innerHTML='<div style="text-align:center;padding:60px;color:var(--text3)"><div style="font-size:48px;margin-bottom:16px">🏗️</div><div style="font-size:16px;margin-bottom:8px">No hay proyectos asignados</div><div style="font-size:13px">Contactá al administrador para que te asigne proyectos</div></div>';
     return;
   }
-  if(data.length===1){session.proyectoActual=0;document.getElementById("topbar-title").textContent=data[0].nombre;}
-  if(data.length>1){
+
+  if(proyectosFiltrados.length===1){
+    session.proyectoActual=0;
+    document.getElementById("topbar-title").textContent=proyectosFiltrados[0].nombre;
+  }
+  if(proyectosFiltrados.length>1){
     const tabs=document.getElementById("proyecto-tabs");
     tabs.style.display="flex";
-    tabs.innerHTML=data.map((p,i)=>`<div class="tab ${i===0?"active":""}" onclick="cambiarTab(${i})">${p.nombre}</div>`).join("");
+    tabs.innerHTML=proyectosFiltrados.map((p,i)=>`<div class="tab ${i===0?"active":""}" onclick="cambiarTab(${i})">${p.nombre}</div>`).join("");
     session.proyectoActual=0;
   }
   renderProyecto(data[session.proyectoActual||0]);
@@ -824,8 +841,8 @@ function renderProyecto(p){
       </div>
     </div>
     <div class="dash-tabs">
-      <div class="dash-tab active" onclick="switchDashTab('financiero')">💰 Control Financiero</div>
-      <div class="dash-tab" onclick="switchDashTab('obra')">🏗️ Avance de Obra</div>
+      <div class="dash-tab active" onclick="switchDashTab('financiero')" ${session.rol!=='admin_principal'&&!session.modulos.includes('control_financiero')?'style="display:none"':''}>💰 Control Financiero</div>
+      <div class="dash-tab" onclick="switchDashTab('obra')" ${session.rol!=='admin_principal'&&!session.modulos.includes('control_obra')&&!session.modulos.includes('cronograma')?'style="display:none"':''}>🏗️ Avance de Obra</div>
     </div>
     <div class="dash-panel active" id="dpanel-financiero">
       <div class="kpi-grid">
