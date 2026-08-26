@@ -187,6 +187,17 @@
   .foto-card:hover{transform:scale(1.03);}
   .foto-card img{width:100%;height:100px;object-fit:cover;}
   .foto-card-info{padding:6px 8px;}
+  /* GESTIÓN DE USUARIOS */
+  .usuarios-tabla{width:100%;border-collapse:collapse;font-size:12px;}
+  .usuarios-tabla th{background:var(--bg3);padding:8px 12px;text-align:left;font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);}
+  .usuarios-tabla td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  .rol-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;}
+  .rol-admin_principal{background:rgba(255,229,0,0.15);color:var(--brand);}
+  .rol-administrativo{background:rgba(59,130,246,0.12);color:#93c5fd;}
+  .rol-residente{background:rgba(27,75,90,0.2);color:var(--green2);}
+  .modulo-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);margin-bottom:4px;}
+  .modulo-check input{accent-color:var(--brand);}
+  .modulos-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:8px;}
   /* LIGHTBOX */
   .lightbox-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:none;align-items:center;justify-content:center;padding:20px;}
   .lightbox-overlay.open{display:flex;}
@@ -274,6 +285,7 @@
       <button id="btn-nuevo-proyecto" class="btn-nuevo" style="display:none" onclick="abrirModalNuevo()">+ Proyecto</button>
       <button id="btn-planos" class="btn-nuevo" style="display:none" onclick="abrirModalPlanos()">📐 Desde Planos</button>
       <button id="btn-obra" class="btn-nuevo" style="display:none" onclick="abrirModalObra()">🏗️ Control de Obra</button>
+      <button id="btn-usuarios" class="btn-nuevo" style="display:none" onclick="abrirModalUsuarios()">👥 Usuarios</button>
       <div id="btn-informes-wrap" style="display:none;position:relative">
         <button class="btn-nuevo" onclick="toggleMenuInformes()">📄 Informes ▾</button>
         <div id="menu-informes" style="display:none;position:absolute;top:36px;right:0;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:6px;min-width:200px;z-index:150;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
@@ -623,8 +635,84 @@
   </div>
 </div>
 
+<!-- MODAL GESTIÓN DE USUARIOS -->
+<div class="modal-overlay" id="modal-usuarios-overlay">
+  <div class="modal" style="max-width:900px;max-height:92vh">
+    <div class="modal-header">
+      <div class="modal-title">👥 Gestión de Usuarios</div>
+      <button class="modal-close" onclick="cerrarModalUsuarios()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--text3)" id="usuarios-count">—</div>
+        <button class="btn-obra-primary" onclick="mostrarFormUsuario()">+ Nuevo Usuario</button>
+      </div>
+
+      <!-- Formulario crear/editar -->
+      <div id="form-usuario" style="display:none;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:18px;margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--brand);margin-bottom:14px" id="form-usuario-titulo">Nuevo Usuario</div>
+        <input type="hidden" id="u-id" value="">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">NOMBRE COMPLETO *</div>
+            <input type="text" id="u-nombre" class="input-obra" placeholder="Juan Pérez">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">USUARIO *</div>
+            <input type="text" id="u-usuario" class="input-obra" placeholder="juan.perez">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:4px">CONTRASEÑA *</div>
+            <input type="password" id="u-password" class="input-obra" placeholder="Mínimo 6 caracteres">
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">ROL BASE</div>
+          <div style="display:flex;gap:12px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+              <input type="radio" name="u-rol" value="administrativo" checked onchange="actualizarModulosPorRol(this.value)"> Administrativo de Campo
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+              <input type="radio" name="u-rol" value="residente" onchange="actualizarModulosPorRol(this.value)"> Residente de Campo
+            </label>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px">
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:8px">PROYECTOS ASIGNADOS</div>
+            <div id="u-proyectos-list" style="display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto"></div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);margin-bottom:8px">MÓDULOS HABILITADOS</div>
+            <div class="modulos-grid" id="u-modulos-list"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-obra" onclick="cancelarFormUsuario()">Cancelar</button>
+          <button class="btn-obra-primary" onclick="guardarUsuario()">Guardar Usuario</button>
+        </div>
+      </div>
+
+      <!-- Lista de usuarios -->
+      <div style="overflow-x:auto">
+        <table class="usuarios-tabla" id="usuarios-tabla">
+          <thead>
+            <tr>
+              <th>Nombre</th><th>Usuario</th><th>Rol</th><th>Proyectos</th><th>Módulos</th><th>Estado</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="usuarios-tbody"></tbody>
+        </table>
+      </div>
+      <div id="usuarios-vacio" style="text-align:center;padding:32px;color:var(--text3);display:none">
+        No hay usuarios registrados aún
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
-let session={admin:false,proyectos:[],proyectoActual:null,tabActual:"cliente"};
+let session={admin:false,proyectos:[],proyectoActual:null,tabActual:"cliente",rol:"",modulos:[],proyectosAsignados:null};
 let modalTab="excel";
 let partidasExcel=[];
 let partidasManual=[];
@@ -660,9 +748,21 @@ async function doLogin(){
       document.getElementById("btn-planos").style.display="inline-flex";
       document.getElementById("btn-obra").style.display="inline-flex";
       document.getElementById("btn-informes-wrap").style.display="inline-flex";
+      if(data.rol==="admin_principal"){
+        document.getElementById("btn-usuarios").style.display="inline-flex";
+      }
+      session.rol = data.rol || "admin_principal";
+      session.modulos = data.modulos || [];
+      session.proyectosAsignados = data.proyectos_asignados || null;
     } else {
       // Cliente: solo puede descargar informe completo
       document.getElementById("btn-informes-wrap").style.display="inline-flex";
+      if(data.rol==="admin_principal"){
+        document.getElementById("btn-usuarios").style.display="inline-flex";
+      }
+      session.rol = data.rol || "admin_principal";
+      session.modulos = data.modulos || [];
+      session.proyectosAsignados = data.proyectos_asignados || null;
     }
     cargarProyectos();
   } else { err.style.display="block"; }
@@ -1559,6 +1659,184 @@ async function descargarInforme(tipo){
     btn.disabled = false;
   }
 }
+
+// ── GESTIÓN DE USUARIOS ──────────────────────────────────
+const MODULOS_LABELS = {
+  control_financiero: "💰 Control Financiero",
+  control_obra: "🏗️ Control de Obra",
+  cronograma: "📅 Cronograma",
+  fotos_bitacora: "📷 Fotos y Bitácora",
+  gastos_manuales: "💵 Gastos Manuales",
+  desde_planos: "📐 Desde Planos",
+  informes_pdf: "📄 Informes PDF",
+  crear_proyectos: "➕ Crear Proyectos",
+  gestion_usuarios: "👥 Gestión Usuarios"
+};
+
+const MODULOS_POR_ROL = {
+  administrativo: ["control_financiero","control_obra","cronograma","fotos_bitacora","gastos_manuales","informes_pdf"],
+  residente: ["cronograma","fotos_bitacora"]
+};
+
+function abrirModalUsuarios(){
+  document.getElementById("modal-usuarios-overlay").classList.add("open");
+  cancelarFormUsuario();
+  cargarUsuarios();
+}
+
+function cerrarModalUsuarios(){
+  document.getElementById("modal-usuarios-overlay").classList.remove("open");
+}
+
+async function cargarUsuarios(){
+  const tbody = document.getElementById("usuarios-tbody");
+  const vacio = document.getElementById("usuarios-vacio");
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3)"><div class="spinner" style="width:16px;height:16px;border-width:2px;margin:0 auto"></div></td></tr>';
+
+  const res = await fetch("/api/usuarios");
+  const data = await res.json();
+
+  if(!data || data.length === 0){
+    tbody.innerHTML = "";
+    vacio.style.display = "block";
+    document.getElementById("usuarios-count").textContent = "Sin usuarios registrados";
+    return;
+  }
+  vacio.style.display = "none";
+  document.getElementById("usuarios-count").textContent = `${data.length} usuario${data.length!==1?"s":""} registrado${data.length!==1?"s":""}`;
+
+  tbody.innerHTML = data.map(u => {
+    const proy = Array.isArray(u.proyectos_asignados) ? u.proyectos_asignados : JSON.parse(u.proyectos_asignados||"[]");
+    const mods = Array.isArray(u.modulos) ? u.modulos : JSON.parse(u.modulos||"[]");
+    return `<tr style="opacity:${u.activo?1:0.5}">
+      <td style="font-weight:600">${u.nombre}</td>
+      <td style="font-family:var(--mono);font-size:11px">${u.usuario}</td>
+      <td><span class="rol-badge rol-${u.rol}">${u.rol==="administrativo"?"Administrativo":"Residente"}</span></td>
+      <td style="font-size:11px;color:var(--text3)">${proy.length>0?proy.join(", "):"Todos"}</td>
+      <td style="font-size:11px;color:var(--text3)">${mods.length} módulo${mods.length!==1?"s":""}</td>
+      <td><span style="font-size:10px;color:${u.activo?"var(--green2)":"var(--text3)"}">${u.activo?"✓ Activo":"✗ Inactivo"}</span></td>
+      <td>
+        <button class="btn-obra" style="font-size:10px;padding:4px 8px;margin-right:4px" onclick="editarUsuario(${u.id})">✏️</button>
+        <button class="btn-obra" style="font-size:10px;padding:4px 8px;color:var(--red2)" onclick="toggleUsuario(${u.id},${u.activo})">${u.activo?"🚫":"✅"}</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function mostrarFormUsuario(){
+  document.getElementById("form-usuario").style.display = "block";
+  document.getElementById("form-usuario-titulo").textContent = "Nuevo Usuario";
+  document.getElementById("u-id").value = "";
+  document.getElementById("u-nombre").value = "";
+  document.getElementById("u-usuario").value = "";
+  document.getElementById("u-password").value = "";
+  document.querySelector('input[name="u-rol"][value="administrativo"]').checked = true;
+  poblarProyectos([]);
+  actualizarModulosPorRol("administrativo");
+}
+
+function cancelarFormUsuario(){
+  document.getElementById("form-usuario").style.display = "none";
+}
+
+function poblarProyectos(asignados){
+  const lista = document.getElementById("u-proyectos-list");
+  lista.innerHTML = session.proyectos.map(p=>`
+    <label class="modulo-check">
+      <input type="checkbox" value="${p.codigo}" ${asignados.length===0||asignados.includes(p.codigo)?"checked":""}>
+      ${p.nombre}
+    </label>`).join("");
+}
+
+function actualizarModulosPorRol(rol){
+  const lista = document.getElementById("u-modulos-list");
+  const defaults = MODULOS_POR_ROL[rol] || [];
+  lista.innerHTML = Object.entries(MODULOS_LABELS).map(([k,v])=>`
+    <label class="modulo-check">
+      <input type="checkbox" value="${k}" ${defaults.includes(k)?"checked":""}>
+      ${v}
+    </label>`).join("");
+}
+
+function getModulosSeleccionados(){
+  return [...document.querySelectorAll("#u-modulos-list input:checked")].map(i=>i.value);
+}
+
+function getProyectosSeleccionados(){
+  const checks = [...document.querySelectorAll("#u-proyectos-list input:checked")];
+  if(checks.length === session.proyectos.length) return []; // todos = array vacío
+  return checks.map(i=>i.value);
+}
+
+async function guardarUsuario(){
+  const id = document.getElementById("u-id").value;
+  const nombre = document.getElementById("u-nombre").value.trim();
+  const usuario = document.getElementById("u-usuario").value.trim();
+  const password = document.getElementById("u-password").value.trim();
+  const rol = document.querySelector('input[name="u-rol"]:checked').value;
+  const modulos = getModulosSeleccionados();
+  const proyectos = getProyectosSeleccionados();
+
+  if(!nombre || !usuario){ alert("Nombre y usuario son obligatorios"); return; }
+  if(!id && !password){ alert("La contraseña es obligatoria para nuevos usuarios"); return; }
+  if(password && password.length < 6){ alert("La contraseña debe tener al menos 6 caracteres"); return; }
+
+  const body = {nombre, usuario, rol, modulos, proyectos_asignados: proyectos};
+  if(password) body.password = password;
+
+  const url = id ? `/api/usuarios/actualizar/${id}` : "/api/usuarios/crear";
+  const method = id ? "PUT" : "POST";
+
+  const res = await fetch(url, {method, headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const data = await res.json();
+
+  if(data.ok){
+    cancelarFormUsuario();
+    await cargarUsuarios();
+  } else {
+    alert("Error: " + (data.msg||"desconocido"));
+  }
+}
+
+async function editarUsuario(id){
+  const res = await fetch("/api/usuarios");
+  const usuarios = await res.json();
+  const u = usuarios.find(x=>x.id===id);
+  if(!u) return;
+
+  mostrarFormUsuario();
+  document.getElementById("form-usuario-titulo").textContent = "Editar Usuario";
+  document.getElementById("u-id").value = id;
+  document.getElementById("u-nombre").value = u.nombre;
+  document.getElementById("u-usuario").value = u.usuario;
+  document.getElementById("u-password").placeholder = "Dejar vacío para no cambiar";
+
+  const rol = u.rol || "administrativo";
+  document.querySelector(`input[name="u-rol"][value="${rol}"]`).checked = true;
+
+  const proy = Array.isArray(u.proyectos_asignados) ? u.proyectos_asignados : JSON.parse(u.proyectos_asignados||"[]");
+  poblarProyectos(proy);
+
+  const mods = Array.isArray(u.modulos) ? u.modulos : JSON.parse(u.modulos||"[]");
+  const lista = document.getElementById("u-modulos-list");
+  lista.innerHTML = Object.entries(MODULOS_LABELS).map(([k,v])=>`
+    <label class="modulo-check">
+      <input type="checkbox" value="${k}" ${mods.includes(k)?"checked":""}>
+      ${v}
+    </label>`).join("");
+}
+
+async function toggleUsuario(id, activo){
+  if(!confirm(`¿${activo?"Desactivar":"Activar"} este usuario?`)) return;
+  const res = await fetch(`/api/usuarios/actualizar/${id}`, {
+    method:"PUT", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({activo:!activo})
+  });
+  const data = await res.json();
+  if(data.ok) await cargarUsuarios();
+  else alert("Error: " + (data.msg||"desconocido"));
+}
+
 
 // ── MÓDULO: GASTOS MANUALES ──────────────────────────────
 function previewComprobante(input){
