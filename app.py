@@ -3,7 +3,7 @@ import xmlrpc.client
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from datetime import datetime, date
-import io, os, json, re, base64
+import io, os, json, re, base64, hashlib
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -47,6 +47,23 @@ SENDGRID_FROM_NAME = os.environ.get("SENDGRID_FROM_NAME", "Vargas Ulloa Maquinar
 def get_db():
     """Retorna conexión a PostgreSQL."""
     return psycopg2.connect(DATABASE_URL, connect_timeout=5)
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def verificar_password(password, hashed):
+    return hash_password(password) == hashed
+
+MODULOS_DISPONIBLES = [
+    "control_financiero","control_obra","cronograma","fotos_bitacora",
+    "gastos_manuales","desde_planos","informes_pdf","crear_proyectos","gestion_usuarios"
+]
+
+MODULOS_POR_ROL = {
+    "admin_principal": MODULOS_DISPONIBLES,
+    "administrativo": ["control_financiero","control_obra","cronograma","fotos_bitacora","gastos_manuales","informes_pdf"],
+    "residente": ["cronograma","fotos_bitacora"]
+}
 
 def init_db():
     """Crea tablas si no existen."""
@@ -122,6 +139,20 @@ def init_db():
                 tipo VARCHAR(50) DEFAULT 'efectivo',
                 comprobante_b64 TEXT,
                 comprobante_tipo VARCHAR(10),
+                creado_en TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY,
+                nombre VARCHAR(100) NOT NULL,
+                usuario VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(200) NOT NULL,
+                rol VARCHAR(30) DEFAULT 'administrativo',
+                proyectos_asignados JSONB DEFAULT '[]',
+                modulos JSONB DEFAULT '[]',
+                activo BOOLEAN DEFAULT TRUE,
+                creado_por VARCHAR(50),
                 creado_en TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -538,11 +569,67 @@ def login():
     usuario  = data.get("usuario","").strip()
     password = data.get("password","").strip()
     codigo   = data.get("codigo","").strip().upper()
+
     if usuario and password:
-        if usuario in ADMINS and ADMINS[usuario] == password:
-            session["tipo"] = "admin"; session["admin"] = True; session["admin_user"] = usuario
-            return jsonify({"ok": True, "admin": True})
+        # 1. Verificar admins principales (hardcodeados en Railway)
+        admins_principales = {
+            os.environ.get("ADMIN_USER", ADMIN_USER): os.environ.get("ADMIN_PASS", ADMIN_PASS)
+        }
+        # Soporte multi-admin (VAUMA y futuros)
+        for k, v in os.environ.items():
+            if k.startswith("ADMIN_USER_"):
+                idx = k.replace("ADMIN_USER_","")
+                pass_key = f"ADMIN_PASS_{idx}"
+                if pass_key in os.environ:
+                    admins_principales[v] = os.environ[pass_key]
+
+        if usuario in admins_principales and admins_principales[usuario] == password:
+            session["tipo"] = "admin"
+            session["admin"] = True
+            session["rol"] = "admin_principal"
+            session["admin_user"] = usuario
+            session["modulos"] = MODULOS_DISPONIBLES
+            return jsonify({"ok": True, "admin": True, "rol": "admin_principal",
+                           "modulos": MODULOS_DISPONIBLES})
+
+        # 2. Verificar usuarios en base de datos
+        try:
+            conn = get_db()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("""
+                SELECT id, nombre, usuario, rol, proyectos_asignados, modulos, activo
+                FROM usuarios WHERE usuario = %s AND activo = TRUE
+            """, (usuario,))
+            user = cur.fetchone()
+            cur.close(); conn.close()
+
+            if user and verificar_password(password, user["password_hash"] if "password_hash" in user else ""):
+                # Re-fetch con password_hash
+                conn = get_db()
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                cur.execute("SELECT * FROM usuarios WHERE usuario = %s AND activo = TRUE", (usuario,))
+                user = dict(cur.fetchone())
+                cur.close(); conn.close()
+
+                if verificar_password(password, user["password_hash"]):
+                    session["tipo"] = "admin"
+                    session["admin"] = True
+                    session["rol"] = user["rol"]
+                    session["admin_user"] = usuario
+                    session["user_id"] = user["id"]
+                    modulos = user["modulos"] if isinstance(user["modulos"], list) else json.loads(user["modulos"] or "[]")
+                    proyectos = user["proyectos_asignados"] if isinstance(user["proyectos_asignados"], list) else json.loads(user["proyectos_asignados"] or "[]")
+                    session["modulos"] = modulos
+                    session["proyectos_asignados"] = proyectos
+                    return jsonify({"ok": True, "admin": True, "rol": user["rol"],
+                                   "modulos": modulos, "proyectos_asignados": proyectos,
+                                   "nombre": user["nombre"]})
+        except Exception as e:
+            print(f"[LOGIN] Error BD: {e}")
+
         return jsonify({"ok": False, "msg": "Usuario o contraseña incorrectos"}), 401
+
+    # Login de cliente por código de proyecto
     proyectos = get_proyectos()
     if codigo in proyectos:
         session["tipo"] = "cliente"; session["codigo"] = codigo; session["admin"] = False
@@ -2459,3 +2546,130 @@ def exportar_mpp(codigo):
         mimetype="application/xml",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+# ═══════════════════════════════════════════════════════════════
+# MÓDULO: GESTIÓN DE USUARIOS
+# ═══════════════════════════════════════════════════════════════
+
+def es_admin_principal():
+    """Verifica si el usuario actual es admin principal."""
+    return session.get("admin") and session.get("rol") == "admin_principal"
+
+def tiene_modulo(modulo):
+    """Verifica si el usuario actual tiene acceso a un módulo."""
+    if session.get("rol") == "admin_principal":
+        return True
+    modulos = session.get("modulos", [])
+    return modulo in modulos
+
+@app.route("/api/usuarios", methods=["GET"])
+def listar_usuarios():
+    """Lista todos los usuarios."""
+    if not es_admin_principal():
+        return jsonify({"error": "No autorizado"}), 401
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, nombre, usuario, rol, proyectos_asignados, modulos, activo, creado_por, creado_en
+            FROM usuarios ORDER BY creado_en DESC
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close(); conn.close()
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/usuarios/crear", methods=["POST"])
+def crear_usuario():
+    """Crea un nuevo usuario."""
+    if not es_admin_principal():
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.json
+    nombre = data.get("nombre", "").strip()
+    usuario = data.get("usuario", "").strip()
+    password = data.get("password", "").strip()
+    rol = data.get("rol", "administrativo")
+    proyectos = data.get("proyectos_asignados", [])
+    modulos = data.get("modulos", MODULOS_POR_ROL.get(rol, []))
+
+    if not nombre or not usuario or not password:
+        return jsonify({"ok": False, "msg": "Nombre, usuario y contraseña son obligatorios"}), 400
+
+    if rol not in ["administrativo", "residente"]:
+        return jsonify({"ok": False, "msg": "Rol inválido"}), 400
+
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO usuarios (nombre, usuario, password_hash, rol, proyectos_asignados, modulos, creado_por)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+        """, (nombre, usuario, hash_password(password), rol,
+              json.dumps(proyectos), json.dumps(modulos),
+              session.get("admin_user", "admin")))
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"ok": True, "id": new_id})
+    except Exception as e:
+        if "unique" in str(e).lower():
+            return jsonify({"ok": False, "msg": f"El usuario '{usuario}' ya existe"}), 400
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@app.route("/api/usuarios/actualizar/<int:user_id>", methods=["PUT"])
+def actualizar_usuario(user_id):
+    """Actualiza un usuario existente."""
+    if not es_admin_principal():
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.json
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        updates = []
+        params = []
+
+        if "nombre" in data:
+            updates.append("nombre = %s"); params.append(data["nombre"])
+        if "rol" in data:
+            updates.append("rol = %s"); params.append(data["rol"])
+        if "proyectos_asignados" in data:
+            updates.append("proyectos_asignados = %s"); params.append(json.dumps(data["proyectos_asignados"]))
+        if "modulos" in data:
+            updates.append("modulos = %s"); params.append(json.dumps(data["modulos"]))
+        if "activo" in data:
+            updates.append("activo = %s"); params.append(data["activo"])
+        if "password" in data and data["password"]:
+            updates.append("password_hash = %s"); params.append(hash_password(data["password"]))
+
+        if not updates:
+            return jsonify({"ok": False, "msg": "Sin cambios"}), 400
+
+        params.append(user_id)
+        cur.execute(f"UPDATE usuarios SET {', '.join(updates)} WHERE id = %s", params)
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@app.route("/api/usuarios/eliminar/<int:user_id>", methods=["DELETE"])
+def eliminar_usuario(user_id):
+    """Desactiva (no elimina) un usuario."""
+    if not es_admin_principal():
+        return jsonify({"error": "No autorizado"}), 401
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("UPDATE usuarios SET activo = FALSE WHERE id = %s", (user_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
