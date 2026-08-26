@@ -640,7 +640,19 @@ def api_proyectos():
     if "tipo" not in session:
         return jsonify({"error": "No autorizado"}), 401
     proyectos = get_proyectos()
-    codigos = list(proyectos.keys()) if session.get("admin") else [session.get("codigo")]
+
+    if session.get("admin"):
+        if session.get("rol") == "admin_principal":
+            codigos = list(proyectos.keys())
+        else:
+            asignados = session.get("proyectos_asignados", [])
+            if asignados:
+                codigos = [c for c in asignados if c in proyectos]
+            else:
+                codigos = list(proyectos.keys())
+    else:
+        codigos = [session.get("codigo")]
+
     resultado = []
     for cod in codigos:
         if not cod or cod not in proyectos: continue
