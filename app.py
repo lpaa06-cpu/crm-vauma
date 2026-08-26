@@ -597,33 +597,26 @@ def login():
             conn = get_db()
             cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute("""
-                SELECT id, nombre, usuario, rol, proyectos_asignados, modulos, activo
+                SELECT id, nombre, usuario, password_hash, rol, proyectos_asignados, modulos, activo
                 FROM usuarios WHERE usuario = %s AND activo = TRUE
             """, (usuario,))
             user = cur.fetchone()
             cur.close(); conn.close()
 
-            if user and verificar_password(password, user["password_hash"] if "password_hash" in user else ""):
-                # Re-fetch con password_hash
-                conn = get_db()
-                cur = conn.cursor(cursor_factory=RealDictCursor)
-                cur.execute("SELECT * FROM usuarios WHERE usuario = %s AND activo = TRUE", (usuario,))
-                user = dict(cur.fetchone())
-                cur.close(); conn.close()
-
-                if verificar_password(password, user["password_hash"]):
-                    session["tipo"] = "admin"
-                    session["admin"] = True
-                    session["rol"] = user["rol"]
-                    session["admin_user"] = usuario
-                    session["user_id"] = user["id"]
-                    modulos = user["modulos"] if isinstance(user["modulos"], list) else json.loads(user["modulos"] or "[]")
-                    proyectos = user["proyectos_asignados"] if isinstance(user["proyectos_asignados"], list) else json.loads(user["proyectos_asignados"] or "[]")
-                    session["modulos"] = modulos
-                    session["proyectos_asignados"] = proyectos
-                    return jsonify({"ok": True, "admin": True, "rol": user["rol"],
-                                   "modulos": modulos, "proyectos_asignados": proyectos,
-                                   "nombre": user["nombre"]})
+            if user and verificar_password(password, user["password_hash"]):
+                user = dict(user)
+                session["tipo"] = "admin"
+                session["admin"] = True
+                session["rol"] = user["rol"]
+                session["admin_user"] = usuario
+                session["user_id"] = user["id"]
+                modulos = user["modulos"] if isinstance(user["modulos"], list) else json.loads(user["modulos"] or "[]")
+                proyectos = user["proyectos_asignados"] if isinstance(user["proyectos_asignados"], list) else json.loads(user["proyectos_asignados"] or "[]")
+                session["modulos"] = modulos
+                session["proyectos_asignados"] = proyectos
+                return jsonify({"ok": True, "admin": True, "rol": user["rol"],
+                               "modulos": modulos, "proyectos_asignados": proyectos,
+                               "nombre": user["nombre"]})
         except Exception as e:
             print(f"[LOGIN] Error BD: {e}")
 
