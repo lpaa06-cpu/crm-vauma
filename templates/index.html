@@ -810,16 +810,18 @@ async function cargarProyectos(){
     tabs.innerHTML=proyectosFiltrados.map((p,i)=>`<div class="tab ${i===0?"active":""}" onclick="cambiarTab(${i})">${p.nombre}</div>`).join("");
     session.proyectoActual=0;
   }
-  renderProyecto(data[session.proyectoActual||0]);
+  const tabInicial = (session.rol !== "admin_principal" && !session.modulos.includes("control_financiero")) ? "obra" : "financiero";
+  renderProyecto(data[session.proyectoActual||0], tabInicial);
 }
 
 function cambiarTab(i){
   session.proyectoActual=i;
   document.querySelectorAll(".tab").forEach((t,j)=>t.classList.toggle("active",i===j));
-  renderProyecto(session.proyectos[i]);
+  const tabInicialCambio = (session.rol !== "admin_principal" && !session.modulos.includes("control_financiero")) ? "obra" : "financiero";
+  renderProyecto(session.proyectos[i], tabInicialCambio);
 }
 
-function renderProyecto(p){
+function renderProyecto(p, tabInicial){
   document.getElementById("sync-info").textContent=`Última sincronización: ${p.actualizado}`;
   document.getElementById("topbar-title").textContent=p.nombre;
   const pctColor=p.pct_global>=100?"var(--red2)":p.pct_global>=80?"var(--yellow2)":"var(--brand)";
@@ -842,10 +844,10 @@ function renderProyecto(p){
       </div>
     </div>
     <div class="dash-tabs">
-      <div class="dash-tab active" onclick="switchDashTab('financiero')" ${session.rol!=='admin_principal'&&!session.modulos.includes('control_financiero')?'style="display:none"':''}>💰 Control Financiero</div>
-      <div class="dash-tab" onclick="switchDashTab('obra')" ${session.rol!=='admin_principal'&&!session.modulos.includes('control_obra')&&!session.modulos.includes('cronograma')?'style="display:none"':''}>🏗️ Avance de Obra</div>
+      <div class="dash-tab ${tabInicial==='financiero'?'active':''}" onclick="switchDashTab('financiero')" ${session.rol!=='admin_principal'&&!session.modulos.includes('control_financiero')?'style="display:none"':''}>💰 Control Financiero</div>
+      <div class="dash-tab ${tabInicial==='obra'?'active':''}" onclick="switchDashTab('obra')" ${session.rol!=='admin_principal'&&!session.modulos.includes('control_obra')&&!session.modulos.includes('cronograma')?'style="display:none"':''}>🏗️ Avance de Obra</div>
     </div>
-    <div class="dash-panel active" id="dpanel-financiero">
+    <div class="dash-panel ${tabInicial==='financiero'?'active':''}" id="dpanel-financiero">
       <div class="kpi-grid">
         <div class="kpi" style="border-top-color:var(--brand)"><div class="kpi-label">Presupuesto Total</div><div class="kpi-value" style="color:var(--brand)">${fmt(p.total_presup)}</div><div class="kpi-sub">${p.partidas.length} partidas</div></div>
         <div class="kpi" style="border-top-color:${pctColor}"><div class="kpi-label">Gastado</div><div class="kpi-value" style="color:${pctColor}">${fmt(p.total_gastado)}</div><div class="kpi-sub">${p.pct_global}% ejecutado</div></div>
@@ -873,12 +875,13 @@ function renderProyecto(p){
         </div>
       </div>
     </div>
-    <div class="dash-panel" id="dpanel-obra">
+    <div class="dash-panel ${tabInicial==='obra'?'active':''}" id="dpanel-obra">
       <div id="dash-obra-contenido"><div class="loading"><div class="spinner"></div> Cargando avance de obra...</div></div>
     </div>`;
 
   // Guardar proyecto actual para la pestaña de obra
   window._proyectoActualCodigo = p.codigo;
+  if(tabInicial === "obra") cargarDashObra(p.codigo);
 }
 
 function switchDashTab(tab){
