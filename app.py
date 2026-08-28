@@ -2678,3 +2678,292 @@ def eliminar_usuario(user_id):
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
+
+# ═══════════════════════════════════════════════════════════════
+# MÓDULO: FLUJO DE CAJA
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/flujo-caja/<codigo>")
+def get_flujo_caja(codigo):
+    """
+    Calcula el flujo de caja mensual proyectado vs real para un proyecto.
+    
+    Proyectado: distribuye el presupuesto de cada capítulo del cronograma
+    linealmente según sus fechas inicio/fin planificadas.
+    
+    Real: suma los gastos de Odoo + manuales por mes.
+    """
+    if "tipo" not in session:
+        return jsonify({"error": "No autorizado"}), 401
+
+    proyectos = get_proyectos()
+    if codigo not in proyectos:
+        return jsonify({"error": "Proyecto no encontrado"}), 404
+
+    p = proyectos[codigo]
+
+    # Obtener cronograma
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT capitulo, fecha_inicio_plan, fecha_fin_plan, duracion_semanas
+            FROM cronograma WHERE proyecto_codigo = %s ORDER BY orden
+        """, (codigo,))
+        cronograma = [dict(r) for r in cur.fetchall()]
+        cur.close(); conn.close()
+    except:
+        cronograma = []
+
+    # Obtener gastos reales por mes (Odoo + manuales)
+    try:
+        gastos_odoo, detalle = obtener_datos_proyecto(p["nombre"], p["partidas"])
+    except:
+        gastos_odoo = {}
+        detalle = {}
+
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT fecha, monto FROM gastos_manuales
+            WHERE proyecto_codigo = %s ORDER BY fecha
+        """, (codigo,))
+        gastos_manuales_raw = [dict(r) for r in cur.fetchall()]
+        cur.close(); conn.close()
+    except:
+        gastos_manuales_raw = []
+
+    # Calcular rango de fechas del proyecto
+    from datetime import date, timedelta
+    import calendar
+
+    if cronograma:
+        fechas_inicio = [r["fecha_inicio_plan"] for r in cronograma if r.get("fecha_inicio_plan")]
+        fechas_fin = [r["fecha_fin_plan"] for r in cronograma if r.get("fecha_fin_plan")]
+        if fechas_inicio and fechas_fin:
+            fecha_inicio_proy = min(fechas_inicio)
+            fecha_fin_proy = max(fechas_fin)
+        else:
+            fecha_inicio_proy = date.today()
+            fecha_fin_proy = date.today() + timedelta(days=180)
+    else:
+        fecha_inicio_proy = date.today()
+        fecha_fin_proy = date.today() + timedelta(days=180)
+
+    # Generar lista de meses
+    meses = []
+    año = fecha_inicio_proy.year
+    mes = fecha_inicio_proy.month
+    while (año, mes) <= (fecha_fin_proy.year, fecha_fin_proy.month):
+        meses.append((año, mes))
+        mes += 1
+        if mes > 12:
+            mes = 1
+            año += 1
+
+    # Calcular presupuesto proyectado por mes
+    # Relacionar cada capítulo con su partida por nombre similar
+    total_presup = sum(m for _, _, m in p["partidas"])
+
+    # Distribuir el presupuesto total del proyecto proporcionalmente al cronograma
+    presup_por_mes = {m: 0.0 for m in meses}
+
+    if cronograma and total_presup > 0:
+        # Calcular duración total del proyecto en días
+        dias_total = (fecha_fin_proy - fecha_inicio_proy).days or 1
+
+        for cap in cronograma:
+            fi = cap.get("fecha_inicio_plan")
+            ff = cap.get("fecha_fin_plan")
+            if not fi or not ff:
+                continue
+
+            # Buscar partida correspondiente por nombre similar
+            presup_cap = 0
+            nombre_cap = cap["capitulo"].lower()
+            for cod, nom, monto in p["partidas"]:
+                if any(word in nombre_cap for word in nom.lower().split() if len(word) > 3):
+                    presup_cap = monto
+                    break
+
+            # Si no coincide por nombre, distribuir proporcionalmente por duración
+            if presup_cap == 0:
+                dur_cap = (ff - fi).days or 1
+                presup_cap = total_presup * (dur_cap / dias_total)
+
+            # Distribuir linealmente entre los meses del capítulo
+            dur_total_cap = (ff - fi).days or 1
+            for (año_m, mes_m) in meses:
+                inicio_mes = date(año_m, mes_m, 1)
+                fin_mes = date(año_m, mes_m, calendar.monthrange(año_m, mes_m)[1])
+                # Intersección del capítulo con el mes
+                inicio_inter = max(fi, inicio_mes)
+                fin_inter = min(ff, fin_mes)
+                if inicio_inter <= fin_inter:
+                    dias_en_mes = (fin_inter - inicio_inter).days + 1
+                    proporcion = dias_en_mes / dur_total_cap
+                    presup_por_mes[(año_m, mes_m)] += presup_cap * proporcion
+
+    # Calcular gastos reales por mes desde detalle Odoo
+    real_por_mes = {m: 0.0 for m in meses}
+
+    # Gastos de Odoo por fecha
+    for cod, nom, _ in p["partidas"]:
+        for gasto in detalle.get(cod, []):
+            try:
+                fecha_g = gasto.get("fecha", "")
+                if isinstance(fecha_g, str) and len(fecha_g) >= 7:
+                    año_g = int(fecha_g[:4])
+                    mes_g = int(fecha_g[5:7])
+                    if (año_g, mes_g) in real_por_mes:
+                        real_por_mes[(año_g, mes_g)] += float(gasto.get("monto", 0))
+            except:
+                pass
+
+    # Gastos manuales por fecha
+    for gm in gastos_manuales_raw:
+        try:
+            fecha_g = gm["fecha"]
+            if hasattr(fecha_g, "year"):
+                año_g, mes_g = fecha_g.year, fecha_g.month
+            else:
+                fecha_g = str(fecha_g)
+                año_g, mes_g = int(fecha_g[:4]), int(fecha_g[5:7])
+            if (año_g, mes_g) in real_por_mes:
+                real_por_mes[(año_g, mes_g)] += float(gm["monto"])
+        except:
+            pass
+
+    # Construir resultado
+    MESES_ES = ["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+    acumulado_proy = 0
+    acumulado_real = 0
+    resultado = []
+
+    for (año_m, mes_m) in meses:
+        proy = round(presup_por_mes[(año_m, mes_m)])
+        real = round(real_por_mes[(año_m, mes_m)])
+        acumulado_proy += proy
+        acumulado_real += real
+        resultado.append({
+            "mes": f"{MESES_ES[mes_m]} {año_m}",
+            "año": año_m,
+            "mes_num": mes_m,
+            "proyectado": proy,
+            "real": real,
+            "diferencia": real - proy,
+            "acumulado_proyectado": round(acumulado_proy),
+            "acumulado_real": round(acumulado_real)
+        })
+
+    return jsonify({
+        "ok": True,
+        "meses": resultado,
+        "total_presupuesto": total_presup,
+        "total_proyectado": round(acumulado_proy),
+        "total_real": round(acumulado_real)
+    })
+
+
+@app.route("/api/flujo-caja-excel/<codigo>", methods=["POST"])
+def flujo_caja_excel(codigo):
+    """Genera Excel del flujo de caja."""
+    if "tipo" not in session:
+        return jsonify({"error": "No autorizado"}), 401
+
+    data = request.json
+    nombre = data.get("nombre", codigo)
+    meses = data.get("meses", [])
+    total = data.get("total", 0)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Flujo de Caja"
+
+    thin = Side(style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def fill(hex_color):
+        return PatternFill("solid", start_color=hex_color, fgColor=hex_color)
+
+    def center():
+        return Alignment(horizontal="center", vertical="center")
+
+    def right():
+        return Alignment(horizontal="right", vertical="center")
+
+    # Anchos
+    ws.column_dimensions["A"].width = 14
+    for col in ["B","C","D","E","F"]:
+        ws.column_dimensions[col].width = 18
+
+    # Título
+    ws.merge_cells("A1:F1")
+    ws["A1"] = f"FLUJO DE CAJA — {nombre.upper()}"
+    ws["A1"].font = Font(name="Arial", bold=True, size=13, color="FFFFFF")
+    ws["A1"].fill = fill("080e0a")
+    ws["A1"].alignment = center()
+
+    ws.merge_cells("A2:F2")
+    ws["A2"] = f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ws["A2"].font = Font(name="Arial", italic=True, size=9, color="888888")
+    ws["A2"].alignment = center()
+
+    # Headers
+    headers = ["MES", "PROYECTADO", "REAL", "DIFERENCIA", "ACUM. PROYECTADO", "ACUM. REAL"]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=3, column=col, value=h)
+        c.font = Font(name="Arial", bold=True, size=9, color="FFFFFF")
+        c.fill = fill("1F3864")
+        c.alignment = center()
+        c.border = border
+
+    for i, mes in enumerate(meses, 4):
+        bg = "FFFFFF" if i % 2 == 0 else "F2F7FB"
+        diff = mes.get("diferencia", 0)
+        diff_color = "EF4444" if diff > 0 else "22C55E" if diff < 0 else "000000"
+
+        vals = [
+            mes["mes"],
+            mes["proyectado"],
+            mes["real"] if mes["real"] > 0 else None,
+            diff if mes["real"] > 0 else None,
+            mes["acumulado_proyectado"],
+            mes["acumulado_real"] if mes["acumulado_real"] > 0 else None
+        ]
+        fmts = [None, "₡#,##0", "₡#,##0", "₡#,##0", "₡#,##0", "₡#,##0"]
+
+        for col, (val, fmt_str) in enumerate(zip(vals, fmts), 1):
+            c = ws.cell(row=i, column=col, value=val)
+            c.font = Font(name="Arial", size=10,
+                color=diff_color if col == 4 else "000000")
+            c.fill = fill(bg)
+            c.alignment = right() if col > 1 else Alignment(horizontal="left", vertical="center")
+            c.border = border
+            if fmt_str and val is not None:
+                c.number_format = fmt_str
+
+    # Fila total
+    row_total = len(meses) + 4
+    total_real = sum(m["real"] for m in meses)
+    ws.cell(row=row_total, column=1, value="TOTAL").font = Font(name="Arial", bold=True, size=11, color="FFFFFF")
+    for col, val in enumerate([total, total_real if total_real > 0 else None, None, total, total_real if total_real > 0 else None], 2):
+        c = ws.cell(row=row_total, column=col, value=val)
+        c.font = Font(name="Arial", bold=True, size=11, color="FFFFFF")
+        c.fill = fill("1F3864")
+        c.alignment = right()
+        c.border = border
+        if val is not None:
+            c.number_format = "₡#,##0"
+    ws.cell(row=row_total, column=1).fill = fill("1F3864")
+    ws.cell(row=row_total, column=1).alignment = Alignment(horizontal="left", vertical="center")
+
+    ws.freeze_panes = "A4"
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(output, as_attachment=True,
+        download_name=f"FlujoCaja_{codigo}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
