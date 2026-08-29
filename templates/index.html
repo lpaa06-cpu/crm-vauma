@@ -457,11 +457,11 @@
       </div>
     </div>
     <div class="modal-body" style="padding:16px">
-      <div class="obra-tabs">
-        <div class="obra-tab active" onclick="switchObraTab('cronograma')">📅 Cronograma</div>
-        <div class="obra-tab" onclick="switchObraTab('fotos')">📷 Fotos</div>
-        <div class="obra-tab" onclick="switchObraTab('bitacora')">📝 Bitácora</div>
-        <div class="obra-tab" onclick="switchObraTab('gastos')">💵 Gastos</div>
+      <div class="obra-tabs" id="obra-tabs-container">
+        <div class="obra-tab active" id="tab-cronograma" onclick="switchObraTab('cronograma')">📅 Cronograma</div>
+        <div class="obra-tab" id="tab-fotos" onclick="switchObraTab('fotos')">📷 Fotos</div>
+        <div class="obra-tab" id="tab-bitacora" onclick="switchObraTab('bitacora')">📝 Bitácora</div>
+        <div class="obra-tab" id="tab-gastos" onclick="switchObraTab('gastos')">💵 Gastos</div>
       </div>
 
       <!-- CRONOGRAMA -->
@@ -469,7 +469,7 @@
         <div id="cronograma-vacio" style="text-align:center;padding:32px;color:var(--text3);display:none">
           <div style="font-size:32px;margin-bottom:12px">📅</div>
           <div style="font-size:14px;margin-bottom:16px">No hay cronograma generado para este proyecto</div>
-          <div style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
+          <div id="cronograma-generar-controles" style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
             <input type="date" class="input-obra" id="fecha-inicio-obra" style="width:160px">
             <button class="btn-obra-primary" onclick="generarCronograma()">✨ Generar con Claude</button>
           </div>
@@ -477,7 +477,7 @@
         <div id="cronograma-contenido" style="display:none">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <div style="font-size:11px;color:var(--text3)">Hacé clic en un capítulo para editar el avance</div>
-            <button class="btn-obra" onclick="regenerarCronograma()">↺ Regenerar</button>
+            <button class="btn-obra" onclick="regenerarCronograma()" id="btn-regenerar-crono">↺ Regenerar</button>
             <button class="btn-obra" onclick="descargarMPP()" title="Exportar a Microsoft Project">📅 Exportar MPP</button>
           </div>
           <div class="gantt-wrap">
@@ -1204,6 +1204,29 @@ let obraCapituloEditando = null;
 
 function abrirModalObra(){
   document.getElementById("modal-obra-overlay").classList.add("open");
+
+  // Controlar visibilidad y permisos de tabs según módulos del usuario
+  const esAdmin = session.rol === "admin_principal";
+  const puedeEditarCrono = esAdmin || session.modulos.includes("control_obra");
+  const tieneFotos = esAdmin || session.modulos.includes("fotos_bitacora");
+  const tieneGastos = esAdmin || session.modulos.includes("gastos_manuales");
+  // Cronograma es visible (solo lectura) para quien tenga fotos_bitacora O control_obra
+  const tieneCronograma = puedeEditarCrono || tieneFotos;
+
+  window._puedeEditarCronograma = puedeEditarCrono;
+
+  const tabCrono = document.getElementById("tab-cronograma");
+  const tabFotos = document.getElementById("tab-fotos");
+  const tabBitacora = document.getElementById("tab-bitacora");
+  const tabGastos = document.getElementById("tab-gastos");
+
+  if(tabCrono) tabCrono.style.display = tieneCronograma ? "" : "none";
+  if(tabFotos) tabFotos.style.display = tieneFotos ? "" : "none";
+  if(tabBitacora) tabBitacora.style.display = tieneFotos ? "" : "none";
+  if(tabGastos) tabGastos.style.display = tieneGastos ? "" : "none";
+
+  // Determinar qué tab abrir por defecto
+  const tabDefault = tieneCronograma ? "cronograma" : tieneFotos ? "fotos" : "gastos";
   const sel = document.getElementById("obra-proyecto-sel");
 
   // Si session.proyectos ya tiene datos, usarlos
@@ -1271,6 +1294,20 @@ async function cargarCronograma(){
 }
 
 function renderCronograma(){
+  const btnRegen = document.getElementById("btn-regenerar-crono");
+  if(btnRegen) btnRegen.style.display = (window._puedeEditarCronograma === false) ? "none" : "";
+  const generarControles = document.getElementById("cronograma-generar-controles");
+  const sinPermisoMsg = document.getElementById("cronograma-sin-permiso-msg");
+  if(window._puedeEditarCronograma === false){
+    if(generarControles) generarControles.style.display = "none";
+    if(!sinPermisoMsg){
+      const vacio = document.getElementById("cronograma-vacio");
+      if(vacio) vacio.insertAdjacentHTML("beforeend", '<div id="cronograma-sin-permiso-msg" style="font-size:12px;color:var(--text3);margin-top:8px">Contactá al administrador para generar el cronograma de este proyecto.</div>');
+    }
+  } else {
+    if(generarControles) generarControles.style.display = "";
+    if(sinPermisoMsg) sinPermisoMsg.remove();
+  }
   const vacio = document.getElementById("cronograma-vacio");
   const contenido = document.getElementById("cronograma-contenido");
   const rows = document.getElementById("gantt-rows");
@@ -1301,7 +1338,8 @@ function renderCronograma(){
     const estadoClass = `estado-${cap.estado||"pendiente"}`;
     const estadoLabel = {pendiente:"Pendiente",en_curso:"En curso",completado:"✓ Listo",atrasado:"⚠ Atrasado"}[cap.estado]||cap.estado;
 
-    return `<div class="gantt-row" style="cursor:pointer" onclick="abrirEditorAvance(${i})">
+    const puedeEditar = window._puedeEditarCronograma !== false;
+    return `<div class="gantt-row" style="${puedeEditar?'cursor:pointer':''}" ${puedeEditar?`onclick="abrirEditorAvance(${i})"`:''}>
       <div class="gantt-label" title="${cap.capitulo}">${cap.capitulo}</div>
       <div style="font-size:10px;color:var(--text3);font-family:var(--mono)">${fmtFecha(cap.fecha_inicio_plan)}</div>
       <div style="font-size:10px;color:var(--text3);font-family:var(--mono)">${fmtFecha(cap.fecha_fin_plan)}</div>
@@ -1322,6 +1360,7 @@ function renderCronograma(){
 }
 
 async function generarCronograma(){
+  if(window._puedeEditarCronograma === false){ alert("No tenés permiso para generar el cronograma."); return; }
   const fecha = document.getElementById("fecha-inicio-obra").value;
   if(!fecha){ alert("Seleccioná una fecha de inicio"); return; }
   document.getElementById("cronograma-vacio").innerHTML = `<div class="loading"><div class="spinner"></div> Claude está generando el cronograma...</div>`;
@@ -1340,6 +1379,7 @@ async function generarCronograma(){
 }
 
 function regenerarCronograma(){
+  if(window._puedeEditarCronograma === false) return;
   document.getElementById("cronograma-contenido").style.display = "none";
   document.getElementById("cronograma-vacio").style.display = "block";
   document.getElementById("cronograma-vacio").innerHTML = `
@@ -1353,6 +1393,7 @@ function regenerarCronograma(){
 }
 
 function abrirEditorAvance(i){
+  if(window._puedeEditarCronograma === false) return;
   const cap = obraCronograma[i];
   obraCapituloEditando = cap;
   document.getElementById("editor-avance").style.display = "block";
