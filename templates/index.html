@@ -387,6 +387,42 @@
   </div>
 </div>
 
+<!-- MODAL EDITAR PRESUPUESTO (agregar/eliminar/modificar partidas — solo admin_principal) -->
+<div class="modal-overlay" id="modal-editar-presupuesto-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="ep-titulo">✏️ Editar Presupuesto</div>
+      <button class="modal-close" onclick="cerrarModalEditarPresupuesto()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="msg-box" id="ep-msg"></div>
+      <div class="partidas-container">
+        <div class="partidas-header">
+          <div class="partidas-title">Partidas actuales — desmarcá las que querés eliminar, o editá nombre/monto</div>
+        </div>
+        <div id="ep-partidas-actuales-list"></div>
+      </div>
+      <div class="partidas-container">
+        <div class="partidas-header">
+          <div class="partidas-title">Nuevas partidas</div>
+          <button class="btn-add-partida" onclick="agregarPartidaEditar()">+ Agregar partida</button>
+        </div>
+        <div id="ep-partidas-nuevas-list"></div>
+      </div>
+      <div class="partidas-container">
+        <div class="partidas-header">
+          <div class="partidas-title">Razón del cambio <span style="color:var(--red2)">*</span></div>
+        </div>
+        <textarea id="ep-razon" class="partida-input" style="width:100%;min-height:60px;resize:vertical;font-family:inherit" placeholder="Explicá por qué se agrega, elimina o modifica el monto de estas partidas (obligatorio)"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="cerrarModalEditarPresupuesto()">Cancelar</button>
+      <button class="btn-save" onclick="guardarPresupuesto()">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL GENERAR DESDE PLANOS -->
 <div class="modal-overlay" id="modal-planos-overlay">
   <div class="modal" style="max-width:760px">
@@ -858,6 +894,7 @@ function renderProyecto(p, tabInicial){
           <div class="proyecto-badge-estado" style="background:${p.pct_global>=100?"rgba(239,68,68,0.15)":p.pct_global>=80?"rgba(245,158,11,0.15)":"rgba(232,160,32,0.12)"};color:${p.pct_global>=100?"var(--red2)":p.pct_global>=80?"var(--yellow2)":"var(--brand)"}">
             ${p.pct_global>=100?"⚠ EXCEDIDO":p.pct_global>=80?"🟡 EN ALERTA":p.pct_global>0?"🟢 EN EJECUCIÓN":"⚪ SIN INICIO"}
           </div>
+          ${session.rol==="admin_principal"?`<button onclick="abrirEditarPresupuesto('${p.codigo}')" style="background:rgba(232,160,32,0.1);border:1px solid rgba(232,160,32,0.3);border-radius:6px;padding:4px 10px;color:var(--brand);font-size:11px;font-weight:600;cursor:pointer" title="Agregar, eliminar o modificar partidas del presupuesto">✏️ Editar Presupuesto</button>`:""}
           ${(session.rol==="admin_principal"||session.modulos.includes("crear_proyectos"))?`<button onclick="eliminarProyecto('${p.codigo}','${p.nombre}')" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:4px 10px;color:var(--red2);font-size:11px;font-weight:600;cursor:pointer" title="Eliminar proyecto">🗑 Eliminar</button>`:""}
         </div>
       </div>
@@ -1167,6 +1204,107 @@ async function guardarProyecto(){
     setTimeout(()=>{cerrarModal();cargarProyectos();},1500);
   } else {
     showMsg(data.msg||"Error al crear proyecto","err");
+  }
+}
+
+// ── EDITAR PRESUPUESTO (agregar/eliminar/modificar partidas — solo admin_principal) ──
+let partidasEditarActuales=[];
+let partidasEditarNuevas=[];
+let proyectoEditandoCodigo=null;
+
+function abrirEditarPresupuesto(codigo){
+  const p=(session.proyectos||[]).find(pr=>pr.codigo===codigo);
+  if(!p) return;
+  proyectoEditandoCodigo=codigo;
+  document.getElementById("ep-titulo").textContent=`✏️ Editar Presupuesto — ${p.nombre}`;
+  partidasEditarActuales=p.partidas.map(pt=>({codigo:pt.codigo,nombre:pt.nombre,monto:pt.presupuesto,mantener:true}));
+  partidasEditarNuevas=[];
+  const msg=document.getElementById("ep-msg"); msg.style.display="none";
+  document.getElementById("ep-razon").value="";
+  renderPartidasActuales();
+  document.getElementById("ep-partidas-nuevas-list").innerHTML="";
+  document.getElementById("modal-editar-presupuesto-overlay").classList.add("open");
+}
+
+function cerrarModalEditarPresupuesto(){
+  document.getElementById("modal-editar-presupuesto-overlay").classList.remove("open");
+}
+
+function renderPartidasActuales(){
+  const list=document.getElementById("ep-partidas-actuales-list");
+  list.innerHTML=partidasEditarActuales.map((pt,i)=>`
+    <div class="partida-row" style="grid-template-columns:28px 74px 1fr 110px;align-items:center">
+      <input type="checkbox" ${pt.mantener?"checked":""} onchange="partidasEditarActuales[${i}].mantener=this.checked;renderPartidasActuales()" style="width:16px;height:16px;cursor:pointer">
+      <div style="font-family:var(--mono);color:var(--text3);font-size:11px;${pt.mantener?"":"opacity:0.4"}">${pt.codigo}</div>
+      <input type="text" class="partida-input" value="${(pt.nombre||"").replace(/"/g,'&quot;')}" ${pt.mantener?"":"disabled"} oninput="partidasEditarActuales[${i}].nombre=this.value" style="font-size:12px;${pt.mantener?"":"opacity:0.4"}">
+      <input type="number" class="partida-input" value="${pt.monto}" ${pt.mantener?"":"disabled"} oninput="partidasEditarActuales[${i}].monto=parseInt(this.value)||0" style="text-align:right;font-size:12px;${pt.mantener?"":"opacity:0.4"}">
+    </div>`).join("");
+}
+
+function agregarPartidaEditar(){
+  const i=partidasEditarNuevas.length;
+  partidasEditarNuevas.push({nombre:"",monto:0});
+  const list=document.getElementById("ep-partidas-nuevas-list");
+  const div=document.createElement("div");
+  div.className="partida-row";
+  div.innerHTML=`<input type="text" class="partida-input" placeholder="Ej: Alquiler de maquinaria" oninput="partidasEditarNuevas[${i}].nombre=this.value"><input type="number" class="partida-input" placeholder="Monto ₡" oninput="partidasEditarNuevas[${i}].monto=parseInt(this.value)||0"><button class="btn-del-partida" onclick="this.parentElement.remove()">✕</button>`;
+  list.appendChild(div);
+}
+
+function showMsgEditar(text,type){
+  const el=document.getElementById("ep-msg");
+  el.textContent=text; el.style.display="block";
+  el.className=`msg-box msg-${type}`;
+}
+
+async function guardarPresupuesto(){
+  if(session.rol!=="admin_principal"){showMsgEditar("Solo el admin principal puede editar el presupuesto.","err");return;}
+
+  const razon=(document.getElementById("ep-razon").value||"").trim();
+  if(!razon){
+    showMsgEditar("Debés indicar la razón del cambio antes de guardar.","err");
+    document.getElementById("ep-razon").focus();
+    return;
+  }
+
+  const partidas=partidasEditarActuales.filter(pt=>pt.mantener).map(pt=>({codigo:pt.codigo,nombre:pt.nombre,monto:pt.monto}));
+  document.querySelectorAll("#ep-partidas-nuevas-list .partida-row").forEach(row=>{
+    const inputs=row.querySelectorAll("input");
+    const n=inputs[0].value.trim(); const m=parseInt(inputs[1].value)||0;
+    if(n&&m>0) partidas.push({codigo:null,nombre:n,monto:m});
+  });
+
+  if(partidas.length===0){
+    showMsgEditar("El presupuesto debe quedar con al menos una partida.","err");
+    return;
+  }
+
+  const eliminando=partidasEditarActuales.some(pt=>!pt.mantener);
+  const modificando=partidasEditarActuales.some(pt=>{
+    const orig=(session.proyectos||[]).find(pr=>pr.codigo===proyectoEditandoCodigo)?.partidas.find(o=>o.codigo===pt.codigo);
+    return pt.mantener&&orig&&(pt.nombre!==orig.nombre||pt.monto!==orig.presupuesto);
+  });
+  if(eliminando&&!confirm("Vas a eliminar una o más partidas del presupuesto. Los gastos manuales ya registrados contra esas partidas permanecen en la base de datos, pero esas partidas dejarán de mostrarse en el CRM. ¿Continuar?")) return;
+  if(modificando&&!confirm("Vas a cambiar el monto y/o nombre de una o más partidas existentes. Este cambio queda registrado con la razón indicada. ¿Continuar?")) return;
+
+  const btn=document.querySelector("#modal-editar-presupuesto-overlay .btn-save");
+  btn.textContent="Guardando..."; btn.disabled=true;
+  try{
+    const res=await fetch(`/api/admin/actualizar-partidas/${proyectoEditandoCodigo}`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({razon,partidas})
+    });
+    const data=await res.json();
+    btn.textContent="Guardar cambios"; btn.disabled=false;
+    if(data.ok){
+      showMsgEditar(`✅ ${data.msg}`,"ok");
+      setTimeout(()=>{cerrarModalEditarPresupuesto();cargarProyectos();},2200);
+    } else {
+      showMsgEditar(data.msg||"Error al actualizar el presupuesto","err");
+    }
+  } catch(e){
+    btn.textContent="Guardar cambios"; btn.disabled=false;
+    showMsgEditar("Error de conexión: "+e.message,"err");
   }
 }
 
