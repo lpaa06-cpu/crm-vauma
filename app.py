@@ -156,6 +156,16 @@ def init_db():
                 creado_en TIMESTAMP DEFAULT NOW()
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS partidas_historial (
+                id SERIAL PRIMARY KEY,
+                proyecto_codigo VARCHAR(50) NOT NULL,
+                usuario VARCHAR(100) DEFAULT 'Admin',
+                razon TEXT NOT NULL,
+                cambios JSONB NOT NULL,
+                creado_en TIMESTAMP DEFAULT NOW()
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
@@ -222,6 +232,24 @@ def delete_proyecto_db(codigo):
         return True
     except Exception as e:
         print(f"[DB] Error delete: {e}")
+        return False
+
+def guardar_historial_partidas(codigo, usuario, razon, cambios):
+    """Registra en el historial quién, cuándo y por qué se modificó el presupuesto de un proyecto."""
+    if not DATABASE_URL:
+        return False
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO partidas_historial (proyecto_codigo, usuario, razon, cambios)
+            VALUES (%s, %s, %s, %s)
+        """, (codigo, usuario, razon, json.dumps(cambios)))
+        conn.commit()
+        cur.close(); conn.close()
+        return True
+    except Exception as e:
+        print(f"[DB] Error guardar historial partidas: {e}")
         return False
 
 # Inicializar DB al arrancar
@@ -783,6 +811,119 @@ def crear_proyecto():
 
     return jsonify({"ok": True, "msg": odoo_msg, "codigo": codigo,
                     "partidas": len(partidas)})
+
+@app.route("/api/admin/actualizar-partidas/<codigo>", methods=["POST"])
+def actualizar_partidas(codigo):
+    """Agrega, elimina o modifica (nombre/monto) partidas de un proyecto YA existente.
+    Solo admin_principal. Requiere una razón del cambio, que queda en el historial."""
+    if not es_admin_principal():
+        return jsonify({"error": "No autorizado"}), 401
+
+    codigo = codigo.strip().upper()
+    proyectos = get_proyectos()
+    if codigo not in proyectos:
+        return jsonify({"ok": False, "msg": "Proyecto no encontrado"}), 404
+
+    p = proyectos[codigo]
+    data = request.json or {}
+
+    razon = (data.get("razon") or "").strip()[:500]
+    if not razon:
+        return jsonify({"ok": False, "msg": "Debe indicar la razón del cambio"}), 400
+
+    partidas_enviadas = data.get("partidas", [])
+    partidas_originales = {pt[0]: pt for pt in p["partidas"]}
+
+    # Prefijo dominante entre las partidas actuales, para generar códigos consistentes en las nuevas
+    prefijos = [pt[0].rsplit("-", 1)[0] for pt in p["partidas"] if "-" in pt[0]]
+    prefijo_dominante = max(set(prefijos), key=prefijos.count) if prefijos else re.sub(r'[^A-Z0-9]', '', codigo[:3])
+    numeros_existentes = []
+    for pt in p["partidas"]:
+        m = re.match(rf"^{re.escape(prefijo_dominante)}-(\d+)$", pt[0])
+        if m:
+            numeros_existentes.append(int(m.group(1)))
+    siguiente = (max(numeros_existentes) + 1) if numeros_existentes else 1
+
+    partidas_finales = []
+    codigos_conservados = set()
+    cambios = []
+
+    for item in partidas_enviadas:
+        cod_in = (item.get("codigo") or "").strip().upper()
+        nombre_p = (item.get("nombre") or "").strip()[:50]
+        try:
+            monto_p = int(item.get("monto", 0))
+        except (TypeError, ValueError):
+            monto_p = 0
+        if not nombre_p or monto_p <= 0:
+            continue
+
+        if cod_in and cod_in in partidas_originales:
+            # Partida existente: se conserva su código, nombre y/o monto pueden venir editados
+            cod_orig, nombre_orig, monto_orig = partidas_originales[cod_in]
+            codigos_conservados.add(cod_in)
+            partidas_finales.append((cod_in, nombre_p, monto_p))
+            if nombre_p != nombre_orig or monto_p != monto_orig:
+                cambios.append(f"Modificada {cod_in}: '{nombre_orig}' ₡{monto_orig:,} → '{nombre_p}' ₡{monto_p:,}")
+        else:
+            # Partida nueva
+            cod_nueva = f"{prefijo_dominante}-{siguiente:02d}"
+            siguiente += 1
+            partidas_finales.append((cod_nueva, nombre_p, monto_p))
+            cambios.append(f"Agregada {cod_nueva}: '{nombre_p}' ₡{monto_p:,}")
+
+    eliminadas = [pt for pt in p["partidas"] if pt[0] not in codigos_conservados]
+    for pt in eliminadas:
+        cambios.append(f"Eliminada {pt[0]}: '{pt[1]}' ₡{pt[2]:,}")
+
+    if not partidas_finales:
+        return jsonify({"ok": False, "msg": "El proyecto debe quedar con al menos una partida"}), 400
+
+    if not cambios:
+        return jsonify({"ok": False, "msg": "No se detectó ningún cambio en las partidas"}), 400
+
+    save_proyecto_db(codigo, p["nombre"], p["cliente"], partidas_finales)
+
+    msg = "Presupuesto actualizado correctamente"
+    if eliminadas:
+        msg += f". Nota: {len(eliminadas)} partida(s) eliminada(s) — los gastos manuales ya registrados contra esas partidas permanecen en la base de datos para no perder el historial, pero esas partidas dejarán de mostrarse en el CRM."
+
+    guardar_historial_partidas(codigo, session.get("admin_user", "Admin"), razon, cambios)
+
+    return jsonify({"ok": True, "msg": msg, "codigo": codigo,
+                    "partidas": len(partidas_finales)})
+
+@app.route("/api/admin/historial-partidas/<codigo>", methods=["GET"])
+def historial_partidas(codigo):
+    """Devuelve el historial de cambios de presupuesto de un proyecto. Solo admin_principal."""
+    if not es_admin_principal():
+        return jsonify({"error": "No autorizado"}), 401
+    codigo = codigo.strip().upper()
+    if not DATABASE_URL:
+        return jsonify({"ok": True, "historial": []})
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT usuario, razon, cambios, creado_en FROM partidas_historial
+            WHERE proyecto_codigo = %s ORDER BY creado_en DESC LIMIT 100
+        """, (codigo,))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        historial = []
+        for r in rows:
+            cambios_r = r["cambios"]
+            if isinstance(cambios_r, str):
+                cambios_r = json.loads(cambios_r)
+            historial.append({
+                "usuario": r["usuario"],
+                "razon": r["razon"],
+                "cambios": cambios_r,
+                "fecha": r["creado_en"].strftime("%Y-%m-%d %H:%M") if r["creado_en"] else ""
+            })
+        return jsonify({"ok": True, "historial": historial})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)[:200]}), 500
 
 @app.route("/api/admin/proyectos-lista")
 def lista_proyectos():
