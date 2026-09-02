@@ -7,6 +7,7 @@ import io, os, json, re, base64, hashlib
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "vauma-maquinaria-2026-secreto")
@@ -48,13 +49,21 @@ SENDGRID_FROM     = os.environ.get("SENDGRID_FROM", "notificaciones@urbanistyka5
 SENDGRID_FROM_NAME = os.environ.get("SENDGRID_FROM_NAME", "Vargas Ulloa Maquinaria S.A.")
 
 def get_db():
-    """Retorna conexión a PostgreSQL."""
-    # Nota: no se pasa connect_timeout como kwarg separado — combinado con un DSN en
-    # formato URI, ciertas versiones de psycopg2 arman mal el DSN final y rompen la
-    # conexión ("invalid dsn: missing '=' after ... in connection info string").
-    # Por eso el timeout se agrega directamente como parámetro de la URI.
-    sep = "&" if "?" in DATABASE_URL else "?"
-    return psycopg2.connect(f"{DATABASE_URL}{sep}connect_timeout=5")
+    """Retorna conexión a PostgreSQL.
+    Nota: la versión de psycopg2 instalada arma mal la cadena de conexión cuando se le
+    pasa la URL completa (sea como dsn+kwargs, o como query param dentro de la URI) —
+    en ambos casos termina mandándole a PostgreSQL un DSN corrupto. Por eso acá se
+    desarma la URL manualmente y se conecta con parámetros individuales, que es la
+    forma que sí funciona en cualquier versión de psycopg2."""
+    u = urlparse(DATABASE_URL)
+    return psycopg2.connect(
+        host=u.hostname,
+        port=u.port or 5432,
+        dbname=(u.path or "").lstrip("/"),
+        user=u.username,
+        password=u.password,
+        connect_timeout=5,
+    )
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
