@@ -36,8 +36,11 @@ ADMIN_PASS = os.environ.get("ADMIN_PASS_1", "Alfaro2026")
 PROYECTOS_BASE = {}
 
 # ── Base de datos PostgreSQL ─────────────────────────
-# Railway inyecta DATABASE_URL interna — usar PUBLIC si está disponible
-DATABASE_URL = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL", "")
+# Usar siempre la URL interna (red privada de Railway) — es instantánea porque no
+# sale a internet. La URL pública (DATABASE_PUBLIC_URL) es para conectarse desde
+# FUERA de Railway (ej. un cliente de DB en tu compu); usarla acá adentro es lo que
+# causaba las conexiones lentas (10+ segundos) y los timeouts.
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # ── SendGrid (notificaciones por email) ──────────────────
 SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
@@ -46,7 +49,12 @@ SENDGRID_FROM_NAME = os.environ.get("SENDGRID_FROM_NAME", "Vargas Ulloa Maquinar
 
 def get_db():
     """Retorna conexión a PostgreSQL."""
-    return psycopg2.connect(DATABASE_URL, connect_timeout=5)
+    # Nota: no se pasa connect_timeout como kwarg separado — combinado con un DSN en
+    # formato URI, ciertas versiones de psycopg2 arman mal el DSN final y rompen la
+    # conexión ("invalid dsn: missing '=' after ... in connection info string").
+    # Por eso el timeout se agrega directamente como parámetro de la URI.
+    sep = "&" if "?" in DATABASE_URL else "?"
+    return psycopg2.connect(f"{DATABASE_URL}{sep}connect_timeout=5")
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
