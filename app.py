@@ -800,7 +800,8 @@ def crear_proyecto():
         partidas.append((cod_partida, p["nombre"][:50], int(p["monto"])))
 
     # Guardar en PostgreSQL
-    save_proyecto_db(codigo, nombre, cliente, partidas)
+    if not save_proyecto_db(codigo, nombre, cliente, partidas):
+        return jsonify({"ok": False, "msg": "No se pudo guardar el proyecto en la base de datos. Intentá de nuevo — si el problema sigue, puede ser un problema de conexión con la base de datos."}), 500
 
     # Crear en Odoo
     try:
@@ -882,7 +883,8 @@ def actualizar_partidas(codigo):
     if not cambios:
         return jsonify({"ok": False, "msg": "No se detectó ningún cambio en las partidas"}), 400
 
-    save_proyecto_db(codigo, p["nombre"], p["cliente"], partidas_finales)
+    if not save_proyecto_db(codigo, p["nombre"], p["cliente"], partidas_finales):
+        return jsonify({"ok": False, "msg": "No se pudo guardar el cambio en la base de datos. Intentá de nuevo — si el problema sigue, puede ser un problema de conexión con la base de datos."}), 500
 
     msg = "Presupuesto actualizado correctamente"
     if eliminadas:
